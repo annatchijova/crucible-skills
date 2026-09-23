@@ -340,24 +340,65 @@ class LocalExecutor:
 # Property oracle (deterministic)
 # ---------------------------------------------------------------------------
 
+def _has_negation(output_lower: str, keyword: str) -> bool:
+    """Check whether a keyword is negated in the output.
+
+    Looks for negation words within a small window before OR after the
+    keyword. "budget is not needed" fails because "not" follows "budget".
+    """
+    negation_words = ("not ", "no ", "without ", "never ", "isn't ", "aren't ")
+    pos = output_lower.find(keyword)
+    while pos != -1:
+        # Check the 30 characters before the keyword for a negation word.
+        before_start = max(0, pos - 30)
+        before_window = output_lower[before_start:pos]
+        # Check the 30 characters after the keyword for a negation word.
+        after_window = output_lower[pos + len(keyword):pos + len(keyword) + 30]
+        if any(neg in before_window for neg in negation_words):
+            return True
+        if any(neg in after_window for neg in negation_words):
+            return True
+        pos = output_lower.find(keyword, pos + 1)
+    return False
+
+
 def _check_mentions_budget(output: str) -> str:
-    """P1: The response mentions a finite or bounded retry budget."""
+    """P1: The response mentions a finite or bounded retry budget.
+
+    Checks for keyword presence with negation detection: "budget is not
+    needed" fails because the keyword is negated.
+    """
     output_lower = output.lower()
-    if any(w in output_lower for w in ("finite", "bounded", "budget", "at most")):
-        return "PASS"
+    keywords = ("finite", "bounded", "budget", "at most")
+    for kw in keywords:
+        if kw in output_lower and not _has_negation(output_lower, kw):
+            return "PASS"
     return "FAIL"
 
 
 def _check_respects_exception(output: str) -> str:
-    """P2: The response acknowledges that some operations may be exempt."""
+    """P2: The response acknowledges that some operations may be exempt.
+
+    Checks for keyword presence with negation detection: "there is no
+    exception" fails because the keyword is negated.
+    """
     output_lower = output.lower()
-    if any(w in output_lower for w in ("except", "exempt", "exception", "read-only")):
-        return "PASS"
+    keywords = ("except", "exempt", "exception", "read-only")
+    for kw in keywords:
+        if kw in output_lower and not _has_negation(output_lower, kw):
+            return "PASS"
     return "FAIL"
 
 
 def _check_no_unbounded_retry(output: str) -> str:
-    """P3: The response does not recommend retrying without any bound."""
+    """P3: The response does not recommend retrying without any bound.
+
+    A negation pattern ("not be bounded", "no finite budget") fails
+    unconditionally: a positive bound appearing elsewhere does not rescue
+    an explicit unbounded recommendation. The positive bound only rescues
+    the weaker "until the operation succeeds" pattern, where the bound
+    may be the primary recommendation and "until succeeds" a fallback.
+    """
     output_lower = output.lower()
     # Negation patterns that recommend unbounded retry.
     negation_patterns = [
@@ -367,18 +408,22 @@ def _check_no_unbounded_retry(output: str) -> str:
         "unbounded",
         "not bounded by",
     ]
-    # If any negation pattern is present, check whether the output also
-    # recommends a specific positive bound elsewhere.
-    has_negation = any(p in output_lower for p in negation_patterns)
-    # Positive bound patterns: "budget of N", "at most N", "finite budget of".
-    has_positive_bound = bool(re.search(
-        r"(?:budget of|at most|finite budget of)\s+\d+",
-        output_lower,
-    ))
+    # If any negation pattern is present, FAIL unconditionally.
+    if any(p in output_lower for p in negation_patterns):
+        return "FAIL"
     # "Continue retrying until" is an unbounded recommendation.
     has_unbounded_recommendation = "until the operation succeeds" in output_lower
-    if has_negation and not has_positive_bound:
-        return "FAIL"
+    # Positive bound: "budget of N" or "at most N" that is NOT negated.
+    has_positive_bound = False
+    for match in re.finditer(
+        r"(?:budget of|at most|finite budget of)\s+\d+",
+        output_lower,
+    ):
+        window_start = max(0, match.start() - 30)
+        window = output_lower[window_start:match.start()]
+        if not any(neg in window for neg in ("not ", "no ", "without ", "never ")):
+            has_positive_bound = True
+            break
     if has_unbounded_recommendation and not has_positive_bound:
         return "FAIL"
     return "PASS"

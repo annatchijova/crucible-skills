@@ -372,6 +372,16 @@ def run_bob_workflow(
         finding, findings, repaired_findings
     )
 
+    # no_new_findings: check that no finding in the repaired audit is absent
+    # from the original audit (set-difference, not count comparison).
+    original_pairs = {
+        (f.get("class", ""), f.get("skill", "")) for f in findings
+    }
+    no_new = all(
+        (rf.get("class", ""), rf.get("skill", "")) in original_pairs
+        for rf in repaired_findings
+    )
+
     return {
         "bob_version": BOB_VERSION,
         "base_audit_digest": base_audit_digest,
@@ -390,7 +400,7 @@ def run_bob_workflow(
         "original_findings": [f["class"] for f in findings],
         "repaired_findings": [f["class"] for f in repaired_findings],
         "original_finding_gone": _finding_gone(finding, repaired_findings),
-        "no_new_findings": len(repaired_findings) <= len(findings),
+        "no_new_findings": no_new,
     }
 
 
@@ -399,11 +409,22 @@ def _evaluate_repair(
     original_findings: list[dict[str, Any]],
     repaired_findings: list[dict[str, Any]],
 ) -> tuple[str, str | None]:
-    """Deterministically evaluate whether the repair is accepted."""
+    """Deterministically evaluate whether the repair is accepted.
+
+    The novelty check uses set-difference, not count comparison. A repair
+    that removes the targeted finding but introduces a different finding
+    (even if the total count stays the same or drops) is REJECTED.
+    """
     if not _finding_gone(finding, repaired_findings):
         return OUTCOME_REJECTED, "FINDING_PERSISTS"
-    if len(repaired_findings) > len(original_findings):
-        return OUTCOME_REJECTED, "NEW_FINDINGS"
+    # Check for findings that were not in the original audit.
+    original_pairs = {
+        (f.get("class", ""), f.get("skill", "")) for f in original_findings
+    }
+    for rf in repaired_findings:
+        pair = (rf.get("class", ""), rf.get("skill", ""))
+        if pair not in original_pairs:
+            return OUTCOME_REJECTED, "NEW_FINDINGS"
     return OUTCOME_ACCEPTED, None
 
 

@@ -266,3 +266,62 @@ def test_finding_index_out_of_range_produces_error() -> None:
     report = run_bob_workflow(finding_index=99)
     assert report["outcome"] == "ERROR"
     assert "out of range" in report["rejection_reason"]
+
+
+# ---------------------------------------------------------------------------
+# D1 regression: no_new_findings must be a novelty check, not a count check
+# ---------------------------------------------------------------------------
+
+def test_d1_swap_finding_rejected_by_novelty() -> None:
+    """D1 regression: a repair that removes the original finding but
+    introduces a different finding class is REJECTED, even if the total
+    count stays the same or drops. Mutation: revert to count comparison
+    -> red."""
+    # Use a corpus with a cycle so the swap can produce exactly 1 finding.
+    corpus = {
+        "retrier": (
+            "---\nname: retrier\n"
+            "description: Retry with budget. Composes with gate.\n"
+            "license: Apache-2.0\n---\n\n"
+            "# Retries\n\n"
+            "Retries MUST have a finite budget.\n\n"
+            "## Composes with\n\n- gate\n"
+        ),
+        "gate": (
+            "---\nname: gate\n"
+            "description: Gate operations.\n"
+            "license: Apache-2.0\n---\n\n"
+            "# Gate\n\n"
+            "Operations MUST be bounded.\n\n"
+            "## Checks\n\n- Verify bounded.\n"
+            "## Composes with\n\n- retrier\n"
+        ),
+    }
+
+    class SwapOneForOneProposer:
+        def propose(self, finding, skill_text, context):
+            if finding.get("skill") == "retrier":
+                # Add checks (removes REQUIREMENT_WITHOUT_CHECK) but add
+                # self-composition (introduces SELF_COMPOSITION).
+                proposed = skill_text + "\n## Checks\n\n- Verify.\n"
+                proposed = proposed + "\n## Composes with\n\n- retrier\n"
+                return {
+                    "proposed_text": proposed,
+                    "rationale": "added checks + self-comp",
+                    "proposer": "swap-1-for-1",
+                }
+            return {
+                "proposed_text": skill_text,
+                "rationale": "no-op",
+                "proposer": "no-op",
+            }
+
+    report = run_bob_workflow(corpus=corpus, proposer=SwapOneForOneProposer(), finding_index=1)
+    # The original finding (REQUIREMENT_WITHOUT_CHECK) is gone.
+    assert report["original_finding_gone"] is True
+    # But a new finding (SELF_COMPOSITION) was introduced.
+    assert "SELF_COMPOSITION" in report["repaired_findings"]
+    # The repair must be REJECTED, not ACCEPTED.
+    assert report["outcome"] == OUTCOME_REJECTED
+    assert report["rejection_reason"] == "NEW_FINDINGS"
+    assert report["no_new_findings"] is False

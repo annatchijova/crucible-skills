@@ -332,3 +332,79 @@ def test_model_output_does_not_affect_oracle_logic() -> None:
     p1_1 = next(o for o in obs1 if o["property_id"] == "P1-mentions-budget")
     p1_2 = next(o for o in obs2 if o["property_id"] == "P1-mentions-budget")
     assert p1_1["status"] == p1_2["status"] == "PASS"
+
+
+# ---------------------------------------------------------------------------
+# D2 regression: negation detection in property oracle
+# ---------------------------------------------------------------------------
+
+def test_d2_p1_fails_on_negated_budget() -> None:
+    """D2 regression: P1 fails when the output says the budget is NOT
+    needed. Mutation: revert to keyword-only matching -> red."""
+    observations = run_property_oracle(
+        "The budget is not needed for this operation.",
+        TASK_FIXTURE["properties"],
+    )
+    p1 = next(o for o in observations if o["property_id"] == "P1-mentions-budget")
+    assert p1["status"] == "FAIL"
+
+
+def test_d2_p2_fails_on_negated_exception() -> None:
+    """D2 regression: P2 fails when the output says there is NO exception.
+    Mutation: revert to keyword-only matching -> red."""
+    observations = run_property_oracle(
+        "There is no exception to this rule.",
+        TASK_FIXTURE["properties"],
+    )
+    p2 = next(o for o in observations if o["property_id"] == "P2-respects-exception")
+    assert p2["status"] == "FAIL"
+
+
+def test_d2_p1_passes_on_non_negated_budget() -> None:
+    """D2 regression: P1 still passes when the budget is mentioned without
+    negation. Mutation: over-correct negation detection -> red."""
+    observations = run_property_oracle(
+        "Use a finite retry budget of 5 attempts.",
+        TASK_FIXTURE["properties"],
+    )
+    p1 = next(o for o in observations if o["property_id"] == "P1-mentions-budget")
+    assert p1["status"] == "PASS"
+
+
+def test_d2_p2_passes_on_non_negated_exception() -> None:
+    """D2 regression: P2 still passes when an exception is mentioned without
+    negation. Mutation: over-correct negation detection -> red."""
+    observations = run_property_oracle(
+        "Except for read-only operations, the budget applies.",
+        TASK_FIXTURE["properties"],
+    )
+    p2 = next(o for o in observations if o["property_id"] == "P2-respects-exception")
+    assert p2["status"] == "PASS"
+
+
+# ---------------------------------------------------------------------------
+# D3 regression: P3 positive bound must not be negated
+# ---------------------------------------------------------------------------
+
+def test_d3_p3_fails_on_negated_bound_with_qualification() -> None:
+    """D3 regression: P3 fails when the output recommends unbounded retry
+    but qualifies with a bound that is itself negated. Mutation: revert
+    to count-any-positive-bound -> red."""
+    observations = run_property_oracle(
+        "Retries should not be bounded by a finite budget. "
+        "However, use a budget of 3 attempts as a guideline.",
+        TASK_FIXTURE["properties"],
+    )
+    p3 = next(o for o in observations if o["property_id"] == "P3-no-unbounded-retry")
+    assert p3["status"] == "FAIL"
+
+
+def test_d3_p3_passes_on_genuine_positive_bound() -> None:
+    """D3 regression: P3 passes when the output has a genuine positive
+    bound without negation. Mutation: over-correct the bound check -> red."""
+    observations = run_property_oracle(
+        "Use a finite budget of 5 attempts for retries.",
+        TASK_FIXTURE["properties"],
+    )
+    p3 = next(o for o in observations if o["property_id"] == "P3-no-unbounded-retry")
+    assert p3["status"] == "PASS"
