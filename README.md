@@ -84,4 +84,4 @@ A skill should survive heat: parsing, composition, deliberate mutation, adversar
 
 ## License
 
-License selection is pending the hackathon submission requirements and dependency review.
+Apache-2.0. See [`LICENSE`](LICENSE).

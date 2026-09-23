@@ -37,4 +37,4 @@ El destino es un sistema completo de verificación de metodología. El tiempo de
 
 ## Licencia
 
-La selección de licencia queda pendiente de los requisitos de entrega del hackathon y de la revisión de dependencias.
+Apache-2.0. Ver [`LICENSE`](LICENSE).

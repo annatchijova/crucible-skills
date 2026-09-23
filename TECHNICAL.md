@@ -250,7 +250,11 @@ Durable decisions live in [`docs/decisions/`](docs/decisions/). The first archit
 
 Red-team work is intentionally deferred until the first integrated implementation exists, but the charter is already defined in [`docs/red-team/`](docs/red-team/). The final review must attack parser boundaries, normalization collisions, graph semantics, mutation coverage, artifact authority, Bob repair loops, and UI projection integrity.
 
-## 13. Known limitations while in progress
+## 13. License
+
+The project is released under Apache-2.0. See [`LICENSE`](LICENSE).
+
+## 14. Known limitations while in progress
 
 - Natural-language contradiction and entailment are not fully decidable from Markdown.
 - Trigger overlap may require a conservative candidate classification before behavioral confirmation.
