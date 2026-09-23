@@ -1,4 +1,4 @@
-"""Command-line surface for compilation, auditing, and composition analysis."""
+"""Command-line surface for compilation, auditing, composition analysis, and mutation testing."""
 
 from __future__ import annotations
 
@@ -8,14 +8,19 @@ import json
 from .auditor import audit_corpus
 from .compiler import compile_corpus
 from .graph import build_composition_graph
+from .mutation import run_mutation_lab
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="crucible",
-        description="Compile, audit, and analyze a skill corpus.",
+        description="Compile, audit, analyze, and mutation-test a skill corpus.",
     )
-    parser.add_argument("root", help="directory containing SKILL.md files")
+    parser.add_argument(
+        "root",
+        nargs="?",
+        help="directory containing SKILL.md files (required unless --mutate)",
+    )
     parser.add_argument(
         "--compile-only",
         action="store_true",
@@ -26,7 +31,20 @@ def main() -> int:
         action="store_true",
         help="emit L1 + L2 audit without L3 composition graph",
     )
+    parser.add_argument(
+        "--mutate",
+        action="store_true",
+        help="run the L4 mutation lab against the built-in base fixture",
+    )
     args = parser.parse_args()
+
+    if args.mutate:
+        report = run_mutation_lab()
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    if not args.root:
+        parser.error("root is required unless --mutate is given")
 
     artifact = compile_corpus(args.root)
     if args.compile_only:

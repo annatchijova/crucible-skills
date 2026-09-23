@@ -106,9 +106,40 @@ and disconnected components. Cross-process digest verified identical. See
 
 **Outcome:** the auditor is tested against plausible methodology defects with hidden ground truth.
 
-Mutants include polarity inversion, exception removal, broken references, removed checks, unsupported claims, widened triggers, enforcement illusion, cycles, and duplicate capabilities.
+**Status:** implemented with 8 mutation classes and honest survivor classification.
+The lab takes a known-good base fixture, applies deliberate mutations, runs
+the full pipeline (compile -> audit -> graph), and classifies each result as
+KILLED, SURVIVED, or ABSTAINED. Survivors are classified by cause:
+INSUFFICIENT_DETECTOR, INSUFFICIENT_REPRESENTATION, DEFECTIVE_ORACLE,
+EQUIVALENT_MUTANT, or OUT_OF_SCOPE.
 
-**Exit evidence:** mutation kill rate is reported with fixture IDs, oracle definitions, and surviving-mutant explanations.
+The 8 mutation classes:
+
+- polarity inversion (MUST -> MUST_NOT);
+- exception removal (drop an exception clause);
+- reference break (point to a non-existent skill);
+- check removal (remove all checks from a skill with rules);
+- trigger widening (narrow trigger -> general trigger);
+- edge removal (remove a composition edge);
+- cycle introduction (add a reverse composition edge);
+- capability duplication (duplicate a skill's rule text in a new skill).
+
+Results: 4 KILLED, 2 SURVIVED, 2 ABSTAINED. Kill rate: 4/6 (excluding
+abstained). The two survivors are diagnostic: EXCEPTION_REMOVAL survives
+because the IR does not extract exceptions (INSUFFICIENT_REPRESENTATION);
+EDGE_REMOVAL survives because the auditor detects broken edges but not
+missing ones (INSUFFICIENT_DETECTOR). The two abstentions are honestly
+out of scope: POLARITY_INVERSION targets NORMATIVE_CONFLICT and
+TRIGGER_WIDENING targets SCOPE_TRIGGER_MISMATCH, both documented as
+abstained in L2.
+
+**Must preserve:** L1+L2+L3 invariants, plus mutation lab determinism, no
+floats, no LLM, sealed report, honest survivor classification, and kill
+rate that excludes abstained.
+
+**Exit evidence:** 16 falsifiable tests cover each mutation class, status
+classification, survivor classification, evidence, and determinism.
+Cross-process digest verified identical. See [L4 red-team review](red-team/2026-09-23-l4-mutation-review.md).
 
 ## L5 — Behavioral differential
 
