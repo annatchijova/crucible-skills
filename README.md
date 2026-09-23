@@ -92,19 +92,24 @@ The hackathon requires a working application running on Nebius Token Factory or 
 
 ## Current state
 
-This repository has the first four coherent implementation levels:
+This repository has the first five coherent implementation levels:
 
 - **L1 — Corpus compiler:** parses `SKILL.md` frontmatter, normative language, checks, relations, and references into a versioned, source-addressable Skill IR (`skill-ir/v1`) with deterministic SHA-256 artifact digests.
 - **L2 — Deterministic auditor:** consumes the L1 IR and emits findings with source evidence and epistemic status (CONFIRMED / CANDIDATE / OBSERVATION), seals an AuditArtifact (`crucible-audit/v1`), and documents five abstained checks as explicit limitations rather than silently passing them.
 - **L3 — Composition graph:** extracts typed relation edges from both L1 section headings and description text (sibling of, pairs with, composes with, member of the family, companion to), classifies them into composition/reinforcement/delegation, detects hubs and disconnected components, and seals a GraphArtifact (`crucible-graph/v1`). The real corpus produces 83 edges, 12 hubs, and 4 disconnected components.
 - **L4 — Mutation laboratory:** seeds 8 defect classes against a known-good base fixture, runs the full pipeline, and classifies results as KILLED / SURVIVED / ABSTAINED. Survivors are classified by cause (INSUFFICIENT_DETECTOR, INSUFFICIENT_REPRESENTATION, OUT_OF_SCOPE). Kill rate: 4/6 (excluding abstained). The lab answers: when we introduce a defect we claim to detect, do we actually detect it?
+- **L5 — Behavioral differential:** runs the same task against 4 skill variants (no-skill, original, mutant, repair), observes 4 explicit properties with a deterministic oracle, and seals the report. The local executor shows the expected differential (mutant fails P3: unbounded retry). The Nebius/Nemotron executor is real code using the Token Factory API; execution is BLOCKED until an API key is available. The model is the subject of observation, not the judge.
 
-L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. The behavioral differential and UI levels remain explicitly in progress.
+L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. The Bob workflow, closed repair loop, and UI levels remain explicitly in progress.
 
-### Run L1, L2, L3, and L4 locally
+### Run L1, L2, L3, L4, and L5 locally
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+# Run the behavioral differential with local executor (L5, no API key needed):
+PYTHONPATH=src python3 -m crucible.cli --behave --local-executor > behavioral-report.json
+# Run the behavioral differential with Nebius (L5, needs NEBIUS_API_KEY):
+PYTHONPATH=src python3 -m crucible.cli --behave > behavioral-report.json
 # Run the mutation lab (L4):
 PYTHONPATH=src python3 -m crucible.cli --mutate > mutation-report.json
 # Compile, audit, and build composition graph (L1+L2+L3):
@@ -140,12 +145,14 @@ crucible-skills/
 │   ├── auditor.py         # L2: deterministic audit engine
 │   ├── graph.py           # L3: typed composition graph
 │   ├── mutation.py        # L4: mutation laboratory
-│   └── cli.py             # compile + audit + graph + mutate CLI
+│   ├── behavioral.py      # L5: behavioral differential harness
+│   └── cli.py             # compile + audit + graph + mutate + behave CLI
 └── tests/
     ├── test_compiler_contract.py  # L1 falsifiable contract tests
     ├── test_auditor_contract.py   # L2 falsifiable contract tests
     ├── test_graph_contract.py     # L3 falsifiable contract tests
-    └── test_mutation_contract.py  # L4 falsifiable contract tests
+    ├── test_mutation_contract.py  # L4 falsifiable contract tests
+    └── test_behavioral_contract.py # L5 falsifiable contract tests
 ```
 
 ## Why “Crucible”

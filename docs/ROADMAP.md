@@ -145,9 +145,32 @@ Cross-process digest verified identical. See [L4 red-team review](red-team/2026-
 
 **Outcome:** a selected methodology is compared against baseline, mutant, and repaired variants on the same task.
 
-**Exit evidence:** observations are tied to explicit properties; no aesthetic “LLM judge” score is presented as proof.
+**Status:** harness implemented and verified with local deterministic executor.
+Nebius/Nemotron execution is BLOCKED (no API key yet). The harness runs the
+same task against four skill variants (no-skill, original, mutant, repair),
+observes whether the model's behavior satisfies 4 explicit properties, and
+seals the report with SHA-256. The property oracle is deterministic; the model
+is the subject of observation, not the judge.
 
-The planned Nebius/NVIDIA route is part of this level, not decoration: a pinned NVIDIA open-source model served through a permitted Nebius runtime must produce behavior that the property oracle can observe. Until that run exists, this is `PLANNED`.
+The 4 properties: P1 (mentions budget), P2 (respects exception), P3 (no
+unbounded retry), P4 (mentions idempotency). The local executor shows the
+expected differential: the polarity-inversion mutant fails P3 (unbounded
+retry) while the original and repair pass all 4.
+
+The Nebius executor is real code (OpenAI-compatible API, Bearer auth, pinned
+`nvidia/nemotron-3-super-120b-a12b` at temperature 0). When `NEBIUS_API_KEY`
+is set, the same harness will run with Nemotron. Until then, the report
+honestly documents `nebius_blocked: True` with the exact reason, and includes
+a local fallback run for harness verification.
+
+**Must preserve:** L1-L4 invariants, plus behavioral determinism, no floats,
+no LLM in the decision path (model is observed, not judge), sealed report,
+honest BLOCKED status, and local fallback when Nebius is unavailable.
+
+**Exit evidence:** 26 falsifiable tests cover the property oracle (positive
+and negative controls), the local executor differential, Nebius BLOCKED
+behavior, determinism, and LLM-out-of-the-loop. Cross-process digest verified
+identical. See [L5 red-team review](red-team/2026-09-23-l5-behavioral-review.md).
 
 ## L6 — Bob workflow
 
