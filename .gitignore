@@ -1,0 +1,30 @@
+# Local planning notes (Spanish working copy; the public roadmap is English).
+docs/ROADMAP_ES.md
+
+# Local environments and generated artifacts.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Local audit outputs and agent workspace state.
+.skilllab/
+audit-output/
+reports/local/
+.env
+.env.*
+!.env.example
+
+# OS/editor noise.
+.DS_Store
+.idea/
+.vscode/
+*.swp
