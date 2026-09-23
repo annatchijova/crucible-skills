@@ -24,6 +24,8 @@ Crucible's deterministic core decides whether the evidence satisfies the contrac
 
 An optional model may narrate or rank candidates after the deterministic artifact exists. It is not the authority for a consequential verdict.
 
+Current external boundary: NVIDIA's public ecosystem already covers security scanning, validation, semantic overlap/deduplication, live agent evaluation, signatures, Skill Cards, and benchmark artifacts. CRUCIBLE therefore narrows its intended contribution to methodology-level IR, typed conditional composition, requirement-to-oracle coverage, and mutation testing of the verifier. See [`docs/COMPETITIVE_BOUNDARY.md`](docs/COMPETITIVE_BOUNDARY.md). The boundary remains partly experimental: conditional contradiction, inferred invariants, and marginal utility are `UNKNOWN / NEEDS EXPERIMENT` until fixtures establish them.
+
 ## 2. Destination architecture
 
 ```mermaid
@@ -242,19 +244,27 @@ Each confirmed result must identify:
 
 The project will prefer deterministic output and explicit abstention over an apparently complete but unsupported verdict.
 
-## 11. Design decisions
+## 11. Model and runtime authority
+
+The NVIDIA model used through Nebius is an experimental behavior generator and observation source, not the authority for deterministic findings. A run must retain model ID, provider/runtime, task digest, corpus/skill digests, sampling controls where available, and the property oracle. A behavioral observation is bounded by that experiment; it is not automatically a universal claim about the methodology.
+
+Imported output from SkillSpector, SkillEvaluator, NVIDIA signatures, or NVIDIA benchmarks is neighboring evidence. It must retain its source, version/commit, artifact identity, and scope. A signature establishes that a directory matches the signed bytes; it does not establish semantic truth. A benchmark establishes what its evaluation measured; it does not establish universal correctness.
+
+The current hackathon requirement matrix and runtime contract are in [`docs/NVIDIA_INTEGRATION.md`](docs/NVIDIA_INTEGRATION.md). The evaluation fixtures and negative controls are in [`docs/EVALUATION_PLAN.md`](docs/EVALUATION_PLAN.md).
+
+## 12. Design decisions
 
 Durable decisions live in [`docs/decisions/`](docs/decisions/). The first architectural decision is recorded in [ADR-0001](docs/decisions/0001-deterministic-core-and-artifact.md).
 
-## 12. Red-team posture
+## 13. Red-team posture
 
 Red-team work is intentionally deferred until the first integrated implementation exists, but the charter is already defined in [`docs/red-team/`](docs/red-team/). The final review must attack parser boundaries, normalization collisions, graph semantics, mutation coverage, artifact authority, Bob repair loops, and UI projection integrity.
 
-## 13. License
+## 14. License
 
 The project is released under Apache-2.0. See [`LICENSE`](LICENSE).
 
-## 14. Known limitations while in progress
+## 15. Known limitations while in progress
 
 - Natural-language contradiction and entailment are not fully decidable from Markdown.
 - Trigger overlap may require a conservative candidate classification before behavioral confirmation.

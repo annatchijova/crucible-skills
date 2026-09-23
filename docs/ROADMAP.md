@@ -2,6 +2,8 @@
 
 **Status: in progress.** This is the public English roadmap. It describes coherent product levels, not a list of disconnected demo features.
 
+The external boundary is explicit: NVIDIA already supplies security scanning, validation, semantic overlap, live evaluation, signatures, and publication governance. CRUCIBLE's roadmap therefore prioritizes methodology IR, typed conditional composition, explicit requirement-to-oracle coverage, mutation testing, and bounded behavioral evidence. The current claim matrix is in [COMPETITIVE_BOUNDARY.md](COMPETITIVE_BOUNDARY.md).
+
 ## Destination
 
 Crucible Skills is a verification and engineering system for agent methodologies. It compiles a corpus into an evidence-bearing intermediate representation, analyzes cross-skill composition, attacks the methodology with seeded mutations, and compares behavioral consequences through explicit properties. Bob participates as an engineering agent; the deterministic artifact remains the authority.
@@ -72,6 +74,8 @@ Mutants include polarity inversion, exception removal, broken references, remove
 **Outcome:** a selected methodology is compared against baseline, mutant, and repaired variants on the same task.
 
 **Exit evidence:** observations are tied to explicit properties; no aesthetic “LLM judge” score is presented as proof.
+
+The planned Nebius/NVIDIA route is part of this level, not decoration: a pinned NVIDIA open-source model served through a permitted Nebius runtime must produce behavior that the property oracle can observe. Until that run exists, this is `PLANNED`.
 
 ## L6 — Bob workflow
 

@@ -12,6 +12,24 @@ Las skills de agentes son metodología ejecutable: cambian qué detecta, prioriz
 
 Crucible Skills busca responderla con evidencia estructurada, no con un puntaje opaco.
 
+## Por qué existe ahora
+
+Las Agent Skills se están convirtiendo en infraestructura. NVIDIA ya está construyendo infraestructura seria alrededor de ellas: SkillSpector cubre riesgos de seguridad y supply chain; SkillEvaluator cubre validación, overlap semántico, datasets sintéticos y evaluación live de agentes; y el catálogo NVIDIA agrega Skill Cards, firmas, benchmarks y gates de publicación. Queremos esos controles. CRUCIBLE no existe porque sean insuficientes o irrelevantes, sino porque no agotan la pregunta metodológica.
+
+> **Una skill no necesita ser maliciosa para ser una mala metodología. Puede ser perfectamente benigna y aun así enseñar a un agente a construir mal.**
+
+Ejemplo:
+
+```text
+Skill A: reintentar operaciones fallidas hasta tener éxito.
+Skill B: las acciones irreversibles deben ser acotadas y revisables.
+
+Ninguna es necesariamente maliciosa por separado.
+La composición falla cuando el objetivo del retry es irreversible y no idempotente.
+```
+
+CRUCIBLE intenta hacer ese tipo de afirmación inspeccionable, condicional y falsable. Es una capa complementaria de verificación metodológica, no un reemplazo de un security scanner ni de un evaluator conductual. Ver la [frontera competitiva](docs/COMPETITIVE_BOUNDARY.md).
+
 ## La idea en un ejemplo
 
 Dos skills pueden parecer razonables por separado y producir una composición incorrecta:

@@ -12,6 +12,24 @@ Agent skills are executable methodology: they change what a capable coding agent
 
 Crucible Skills is being built to answer that question with structured evidence instead of an opaque quality score.
 
+## Why this exists now
+
+Agent Skills are becoming infrastructure. NVIDIA is already building serious infrastructure around them: SkillSpector addresses security and supply-chain risk; SkillEvaluator covers validation, semantic overlap, synthetic evaluation, and live agent comparison; and the NVIDIA catalog adds Skill Cards, signatures, benchmark artifacts, and publication gates. We want those controls. CRUCIBLE does not exist because they are unimportant; it exists because they do not exhaust the methodology question.
+
+> **A skill does not need to be malicious to be harmful methodology. It can be perfectly benign and still teach an agent to engineer badly.**
+
+For example:
+
+```text
+Skill A: retry failed operations until success.
+Skill B: irreversible actions must be bounded and reviewable.
+
+Neither is necessarily malicious in isolation.
+The composition is problematic when the retry target is irreversible and non-idempotent.
+```
+
+CRUCIBLE is designed to make that kind of claim inspectable, conditional, and falsifiable. It is a complementary methodology-verification layer, not a replacement security scanner or live-agent evaluator. See the [competitive boundary](docs/COMPETITIVE_BOUNDARY.md) for the evidence-backed comparison.
+
 ## The idea in one example
 
 Two skills can each look reasonable while creating a bad composition:
@@ -58,9 +76,21 @@ Crucible is intended to complement security scanners and live agent evaluators, 
 5. **Behavioral differential** — compare baseline, original, mutated, and repaired methodology on the same task with explicit properties.
 6. **Bob workflow** — let IBM Bob investigate, repair, and challenge findings while Crucible remains the authority that verifies the result.
 
+## The NVIDIA/Nebius experiment
+
+For the Nebius x NVIDIA Global AI Hackathon, the NVIDIA open-source model must have a real experimental role. The planned experiment pins one task, corpus, skill variant, model/runtime, and property oracle, then compares:
+
+```text
+no skill → original skill → deliberate mutant → candidate repair
+```
+
+The model generates the agent behavior that the oracle observes. CRUCIBLE records the model/runtime metadata and keeps deterministic findings separate from behavioral observations. The integration contract and current requirement matrix are in [`docs/NVIDIA_INTEGRATION.md`](docs/NVIDIA_INTEGRATION.md).
+
+The hackathon requires a working application running on Nebius Token Factory or Nebius AI Cloud, at least one NVIDIA open-source model, an open-source public repository, README setup instructions, a working demo or test build where applicable, and a public demo video of three minutes or less. These are planned submission obligations, not claims that the current repository already satisfies them.
+
 ## Current state
 
-This repository currently contains the project map, technical contract, decision records, and red-team charter. Implementation begins only after these documents stabilize the destination and its invariants.
+This repository currently contains the project map, technical contract, competitive boundary, source record, evaluation plan, decision records, and red-team charter. Implementation begins only after these documents stabilize the destination and its invariants.
 
 The intended stopping rule is deliberate: under a deadline, reach fewer complete levels rather than many disposable slices. Every level must remain useful and compatible with the final system.
 
@@ -73,6 +103,10 @@ crucible-skills/
 ├── TECHNICAL.md           # architecture, contracts, threats, evidence
 ├── docs/
 │   ├── ROADMAP.md         # public construction map
+│   ├── COMPETITIVE_BOUNDARY.md # NVIDIA overlap and surviving gap
+│   ├── NVIDIA_INTEGRATION.md   # hackathon requirements and runtime contract
+│   ├── EVALUATION_PLAN.md      # metrics, fixtures, and negative controls
+│   ├── SOURCES.md              # source-backed research record
 │   ├── decisions/         # durable architectural decisions
 │   └── red-team/          # adversarial review plans and evidence
 └── src/                   # implementation will arrive by coherent level

@@ -51,3 +51,7 @@ Rejected as incomplete for the thesis. Security and quality are useful neighbori
 ## Revisit trigger
 
 Revisit if deterministic coverage proves unable to express a required claim without silently collapsing into arbitrary heuristics. The response should be to narrow the claim or add an explicit candidate/abstain state before moving authority into a model.
+
+## External boundary recorded
+
+This decision does not assume that CRUCIBLE is the first or only system to validate Agent Skills. NVIDIA's public tools already cover adjacent and overlapping lifecycle stages. The decision remains useful because it specifies how CRUCIBLE treats imported scanner/evaluator output: as provenance-bearing neighboring evidence, never as an implicit replacement for the local deterministic authority.
