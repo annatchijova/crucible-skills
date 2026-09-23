@@ -19,6 +19,7 @@ build/
 .skilllab/
 audit-output/
 reports/local/
+docs/research/
 .env
 .env.*
 !.env.example
