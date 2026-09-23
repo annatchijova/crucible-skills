@@ -176,9 +176,29 @@ identical. See [L5 red-team review](red-team/2026-09-23-l5-behavioral-review.md)
 
 **Outcome:** IBM Bob can use findings as engineering work: explore, inspect neighboring skills, propose a repair, and challenge the repair.
 
-**Boundary:** Bob proposes. Crucible re-compiles, re-audits, and replays.
+**Status:** implemented with rule-based proposer (verified) and LLM proposer
+(BLOCKED, no API key). Bob receives audit findings, proposes a repair, and
+Crucible deterministically re-audits the repaired corpus. The acceptance
+criteria are deterministic: the targeted finding must be gone AND no new
+findings introduced AND the corpus compiles.
 
-**Exit evidence:** a repair candidate is accepted or rejected by the same artifact-producing verification path.
+The proposer is pluggable. The rule-based proposer handles 3 finding classes
+(REQUIREMENT_WITHOUT_CHECK, BROKEN_REFERENCE, STRUCTURAL_REDUNDANCY) with
+deterministic repair patterns. The LLM proposer uses Nemotron via Nebius to
+generate a repair; without NEBIUS_API_KEY, the proposal is BLOCKED, not
+simulated.
+
+**Boundary:** Bob proposes. Crucible re-compiles, re-audits, and decides.
+
+**Must preserve:** L1-L5 invariants, plus Bob determinism (same corpus +
+same proposer = same outcome), no LLM in the decision path (proposer generates
+text, re-audit decides), honest BLOCKED for LLM proposer, and chain of
+custody (base + repaired audit digests).
+
+**Exit evidence:** 14 falsifiable tests cover acceptance, rejection (bad
+repair, compile error, new findings), BLOCKED behavior, determinism, and
+LLM-out-of-the-loop. Cross-process outcome verified identical. See
+[L6 red-team review](red-team/2026-09-23-l6-bob-review.md).
 
 ## L7 — Closed repair loop
 

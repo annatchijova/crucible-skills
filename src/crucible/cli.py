@@ -1,4 +1,4 @@
-"""Command-line surface for compilation, auditing, composition analysis, mutation testing, and behavioral differential."""
+"""Command-line surface for compilation, auditing, composition analysis, mutation testing, behavioral differential, and Bob workflow."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import json
 
 from .auditor import audit_corpus
 from .behavioral import LocalExecutor, NebiusExecutor, run_behavioral_differential
+from .bob import LLMProposer, RuleBasedProposer, run_bob_workflow
 from .compiler import compile_corpus
 from .graph import build_composition_graph
 from .mutation import run_mutation_lab
@@ -15,12 +16,12 @@ from .mutation import run_mutation_lab
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="crucible",
-        description="Compile, audit, analyze, mutation-test, and behaviorally evaluate a skill corpus.",
+        description="Compile, audit, analyze, mutation-test, behaviorally evaluate, and repair a skill corpus.",
     )
     parser.add_argument(
         "root",
         nargs="?",
-        help="directory containing SKILL.md files (required unless --mutate or --behave)",
+        help="directory containing SKILL.md files (required unless --mutate/--behave/--bob)",
     )
     parser.add_argument(
         "--compile-only",
@@ -47,6 +48,16 @@ def main() -> int:
         action="store_true",
         help="use the local deterministic executor instead of Nebius (for testing)",
     )
+    parser.add_argument(
+        "--bob",
+        action="store_true",
+        help="run the L6 Bob workflow on the first finding",
+    )
+    parser.add_argument(
+        "--llm-proposer",
+        action="store_true",
+        help="use the LLM proposer (Nemotron via Nebius) instead of rule-based",
+    )
     args = parser.parse_args()
 
     if args.mutate:
@@ -63,8 +74,17 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
+    if args.bob:
+        if args.llm_proposer:
+            proposer = LLMProposer()
+        else:
+            proposer = RuleBasedProposer()
+        report = run_bob_workflow(proposer=proposer)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
     if not args.root:
-        parser.error("root is required unless --mutate or --behave is given")
+        parser.error("root is required unless --mutate/--behave/--bob is given")
 
     artifact = compile_corpus(args.root)
     if args.compile_only:
