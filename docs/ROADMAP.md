@@ -71,6 +71,15 @@ identical. See [L2 red-team review](red-team/2026-09-23-l2-auditor-review.md).
 
 **Outcome:** the corpus is analyzed as a system rather than as isolated files.
 
+**Status:** implemented for edge extraction and graph property detection. The
+graph consumes the L1 IR, extracts typed relation edges from both L1
+section-heading relations and description text (sibling of, pairs with,
+composes with, member of the family, companion to), classifies them into
+relation types (composition, reinforcement, delegation), and detects graph
+properties (hubs, broken edges, disconnected components, isolated skills).
+The real corpus produces 83 edges (all resolved), 12 hubs, 4 disconnected
+components, and 38 isolated skills.
+
 The graph distinguishes:
 
 - redundancy;
@@ -80,7 +89,18 @@ The graph distinguishes:
 - delegation;
 - reference/provenance edges.
 
-**Exit evidence:** graph fixtures cover hubs, orphans, cycles, typed edges, and at least one conditional conflict.
+Of these, three relation types are classified (COMPOSITION, REINFORCEMENT,
+DELEGATION) and three checks are abstained (CONDITIONAL_CONTRADICTION,
+SEMANTIC_REDUNDANCY, PRODUCER_CONSUMER_TYPING) because the current IR does
+not extract conditions, subjects, or typed property flows.
+
+**Must preserve:** L1+L2 invariants (determinism, source evidence, candidate
+status, sealed artifacts, honest abstention), plus graph determinism, no
+floats, no LLM, and typed edge classification.
+
+**Exit evidence:** graph fixtures cover hubs, orphans, cycles, typed edges,
+and disconnected components. Cross-process digest verified identical. See
+[L3 red-team review](red-team/2026-09-23-l3-graph-review.md).
 
 ## L4 — Mutation laboratory
 

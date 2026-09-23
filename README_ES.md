@@ -53,7 +53,7 @@ Ver el detalle completo en el [Technical README](TECHNICAL.md) y el mapa de cons
 
 ## Estado de implementación
 
-Ya existen dos niveles coherentes: el compilador L1 transforma un corpus real en una Skill IR versionada, con source spans y digest SHA-256 determinista; y el auditor L2 consume esa IR, emite findings con evidencia y estado epistémico (CONFIRMED / CANDIDATE / OBSERVATION), sella un AuditArtifact (`crucible-audit/v1`) y documenta cinco checks abstados como limitaciones explícitas. El corpus local probado produjo 103 skills, 140 líneas normativas extraídas y 175 checks bajo el scope actual del parser. La auditoría L2 sobre el mismo corpus produce 1 finding (CANDIDATE) y 5 limitaciones documentadas. La composición profunda, mutaciones, comportamiento y UI siguen explícitamente en progreso.
+Ya existen tres niveles coherentes: el compilador L1 transforma un corpus real en una Skill IR versionada, con source spans y digest SHA-256 determinista; el auditor L2 consume esa IR, emite findings con evidencia y estado epistémico (CONFIRMED / CANDIDATE / OBSERVATION), sella un AuditArtifact (`crucible-audit/v1`) y documenta cinco checks abstados como limitaciones explícitas; y el grafo L3 extrae aristas tipadas de relaciones desde headings de sección y texto de descripción (sibling of, pairs with, composes with, member of the family, companion to), los clasifica en composition/reinforcement/delegation, detecta hubs y componentes desconectados, y sella un GraphArtifact (`crucible-graph/v1`). El corpus local produce 83 aristas, 12 hubs y 4 componentes desconectados. La mutación, comportamiento y UI siguen explícitamente en progreso.
 
 ## Principio de construcción
 

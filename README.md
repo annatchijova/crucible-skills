@@ -92,19 +92,22 @@ The hackathon requires a working application running on Nebius Token Factory or 
 
 ## Current state
 
-This repository has the first two coherent implementation levels:
+This repository has the first three coherent implementation levels:
 
 - **L1 — Corpus compiler:** parses `SKILL.md` frontmatter, normative language, checks, relations, and references into a versioned, source-addressable Skill IR (`skill-ir/v1`) with deterministic SHA-256 artifact digests.
 - **L2 — Deterministic auditor:** consumes the L1 IR and emits findings with source evidence and epistemic status (CONFIRMED / CANDIDATE / OBSERVATION), seals an AuditArtifact (`crucible-audit/v1`), and documents five abstained checks as explicit limitations rather than silently passing them.
+- **L3 — Composition graph:** extracts typed relation edges from both L1 section headings and description text (sibling of, pairs with, composes with, member of the family, companion to), classifies them into composition/reinforcement/delegation, detects hubs and disconnected components, and seals a GraphArtifact (`crucible-graph/v1`). The real corpus produces 83 edges, 12 hubs, and 4 disconnected components.
 
-L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations on the same corpus. The deeper composition, mutation, behavioral, and UI levels remain explicitly in progress.
+L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). The deeper mutation, behavioral, and UI levels remain explicitly in progress.
 
-### Run L1 and L2 locally
+### Run L1, L2, and L3 locally
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
-# Compile and audit (default):
-PYTHONPATH=src python3 -m crucible.cli /path/to/skill-corpus > audit-artifact.json
+# Compile, audit, and build composition graph (default):
+PYTHONPATH=src python3 -m crucible.cli /path/to/skill-corpus > graph-artifact.json
+# Compile and audit without graph:
+PYTHONPATH=src python3 -m crucible.cli --no-graph /path/to/skill-corpus > audit-artifact.json
 # Compile only (L1 IR):
 PYTHONPATH=src python3 -m crucible.cli --compile-only /path/to/skill-corpus > ir.json
 ```
@@ -132,10 +135,12 @@ crucible-skills/
 │   ├── ir.py              # canonical serialization and SHA-256 sealing
 │   ├── compiler.py        # L1: SKILL.md → versioned Skill IR
 │   ├── auditor.py         # L2: deterministic audit engine
-│   └── cli.py             # compile + audit command-line surface
+│   ├── graph.py           # L3: typed composition graph
+│   └── cli.py             # compile + audit + graph command-line surface
 └── tests/
     ├── test_compiler_contract.py  # L1 falsifiable contract tests
-    └── test_auditor_contract.py   # L2 falsifiable contract tests
+    ├── test_auditor_contract.py   # L2 falsifiable contract tests
+    └── test_graph_contract.py     # L3 falsifiable contract tests
 ```
 
 ## Why “Crucible”
