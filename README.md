@@ -4,6 +4,8 @@
 
 [English](README.md) · [Español](README_ES.md) · **[Technical README](TECHNICAL.md)**
 
+![Crucible Skills logo](visual/logo.png)
+
 > **Status: In progress — architecture and evaluation contract first.**
 
 Agent skills are executable methodology: they change what a capable coding agent notices, prioritizes, verifies, and does. Existing tools can validate their shape, scan them for malicious behavior, and evaluate whether an agent performs better with them. That still leaves a harder question:

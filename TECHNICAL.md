@@ -2,6 +2,8 @@
 
 **Status: In progress.** This document is the technical contract under construction; it is intentionally more precise than the public README and records decisions before implementation hardens them.
 
+![Crucible Skills logo](visual/logo.png)
+
 ## 1. System thesis
 
 An agent skill is not merely Markdown. It is a portable methodology that can change an agent's decisions across tasks. Therefore, a corpus needs more than file validation and security scanning. It needs an inspectable representation of:

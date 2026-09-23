@@ -4,6 +4,8 @@
 
 [English](README.md) · **Español** · [Technical README](TECHNICAL.md)
 
+![Logo de Crucible Skills](visual/logo.png)
+
 > **Estado: en progreso — primero el contrato arquitectónico y de evaluación.**
 
 Las skills de agentes son metodología ejecutable: cambian qué detecta, prioriza, verifica y hace un agente de coding. Ya existen herramientas para validar su forma, buscar comportamiento malicioso y medir si un agente rinde mejor con ellas. Falta una pregunta más difícil:
