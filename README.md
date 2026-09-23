@@ -92,13 +92,21 @@ The hackathon requires a working application running on Nebius Token Factory or 
 
 ## Current state
 
-This repository now has the first coherent implementation level: the L1 corpus compiler emits a versioned, source-addressable Skill IR with deterministic SHA-256 artifact digests. It has been exercised against the local real corpus (103 skills, 140 extracted normative lines, and 175 checks under the current parser scope). The deeper audit, mutation, behavioral, and UI levels remain explicitly in progress.
+This repository has the first two coherent implementation levels:
 
-### Run L1 locally
+- **L1 — Corpus compiler:** parses `SKILL.md` frontmatter, normative language, checks, relations, and references into a versioned, source-addressable Skill IR (`skill-ir/v1`) with deterministic SHA-256 artifact digests.
+- **L2 — Deterministic auditor:** consumes the L1 IR and emits findings with source evidence and epistemic status (CONFIRMED / CANDIDATE / OBSERVATION), seals an AuditArtifact (`crucible-audit/v1`), and documents five abstained checks as explicit limitations rather than silently passing them.
+
+L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations on the same corpus. The deeper composition, mutation, behavioral, and UI levels remain explicitly in progress.
+
+### Run L1 and L2 locally
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+# Compile and audit (default):
 PYTHONPATH=src python3 -m crucible.cli /path/to/skill-corpus > audit-artifact.json
+# Compile only (L1 IR):
+PYTHONPATH=src python3 -m crucible.cli --compile-only /path/to/skill-corpus > ir.json
 ```
 
 The current corpus numbers are an observed run, not a universal benchmark. See the parser boundary in [ADR-0002](docs/decisions/0002-conservative-frontmatter-parser.md).
@@ -120,7 +128,14 @@ crucible-skills/
 │   ├── SOURCES.md              # source-backed research record
 │   ├── decisions/         # durable architectural decisions
 │   └── red-team/          # adversarial review plans and evidence
-└── src/                   # implementation will arrive by coherent level
+├── src/crucible/
+│   ├── ir.py              # canonical serialization and SHA-256 sealing
+│   ├── compiler.py        # L1: SKILL.md → versioned Skill IR
+│   ├── auditor.py         # L2: deterministic audit engine
+│   └── cli.py             # compile + audit command-line surface
+└── tests/
+    ├── test_compiler_contract.py  # L1 falsifiable contract tests
+    └── test_auditor_contract.py   # L2 falsifiable contract tests
 ```
 
 ## Why “Crucible”

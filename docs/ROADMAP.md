@@ -35,6 +35,12 @@ flowchart LR
 
 **Outcome:** a developer can run an audit and receive reproducible findings with evidence.
 
+**Status:** implemented for the checks the current IR can support. The auditor
+consumes the L1 Skill IR, emits findings with source evidence and epistemic
+status, seals an AuditArtifact (`crucible-audit/v1`), and documents five
+abstained checks as explicit limitations. The real corpus produces 1 finding
+(REQUIREMENT_WITHOUT_CHECK, CANDIDATE) with 5 documented limitations.
+
 Initial checks:
 
 - broken references;
@@ -46,7 +52,20 @@ Initial checks:
 - scope and trigger inconsistencies;
 - structural redundancy.
 
-**Exit evidence:** fixtures demonstrate stable findings, stable source spans, and honest abstention for unsupported semantics.
+Of these, six are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
+COMPOSITION_CYCLE, ORPHAN_SKILL, REQUIREMENT_WITHOUT_CHECK,
+STRUCTURAL_REDUNDANCY) and five are abstained with documented reasons
+(DESCRIPTION_BODY_GAP, CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE,
+SCOPE_TRIGGER_MISMATCH, NORMATIVE_CONFLICT). Abstention is honest: the current
+IR does not extract the fields these checks require.
+
+**Must preserve:** L1 invariants (determinism, source spans, candidate status,
+identity checks, artifact determinism), plus audit determinism, no floats, no
+LLM, sealed artifact, and honest abstention.
+
+**Exit evidence:** fixtures demonstrate stable findings, stable source spans,
+and honest abstention for unsupported semantics. Cross-process digest verified
+identical. See [L2 red-team review](red-team/2026-09-23-l2-auditor-review.md).
 
 ## L3 — Composition graph
 

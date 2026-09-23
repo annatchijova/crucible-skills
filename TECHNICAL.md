@@ -84,7 +84,7 @@ The levels are coherent product states, not technical departments. Security, det
 | Level | Coherent state | Exit evidence |
 |---|---|---|
 | L1 | Corpus compiler and versioned Skill IR | **Implemented:** a real corpus compiles with stable identities, source spans, nested/block frontmatter support within the declared subset, and a deterministic artifact digest. |
-| L2 | Deterministic single-corpus auditor | Findings are reproducible and explainable from IR evidence. |
+| L2 | Deterministic single-corpus auditor | **Implemented:** the auditor consumes the L1 IR, emits findings with source evidence and epistemic status (CONFIRMED / CANDIDATE / OBSERVATION), seals an AuditArtifact (`crucible-audit/v1`), and documents five abstained checks as explicit limitations. Cross-process digest verified identical. |
 | L3 | Typed composition graph | Redundancy, composition, reinforcement, and contradiction are separate relations. |
 | L4 | Mutation laboratory | Seeded defects produce expected killed/survived results. |
 | L5 | Behavioral differential harness | Baseline/original/mutant/repaired runs use explicit task properties. |
