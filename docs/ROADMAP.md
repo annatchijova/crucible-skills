@@ -25,9 +25,11 @@ flowchart LR
 
 **Outcome:** a real collection of skills compiles into a versioned, source-addressable Skill IR.
 
+**Status:** implemented for the current declared frontmatter subset. The compiler has been run against the local real corpus: 103 skills, 140 extracted normative lines, 175 checks, and a reproducible artifact digest. This is corpus compilation evidence, not evidence that the corpus is correct.
+
 **Must preserve:** raw source, content digest, source spans, identity, parse diagnostics, and explicit unsupported constructs.
 
-**Exit evidence:** repeated compilation of the same corpus produces the same canonical IR and diagnostics.
+**Exit evidence:** repeated compilation of the same corpus produces the same canonical IR and diagnostics; the test suite includes a deliberate schema mutation that goes red.
 
 ## L2 — Deterministic audit
 

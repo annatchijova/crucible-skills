@@ -81,7 +81,7 @@ The levels are coherent product states, not technical departments. Security, det
 
 | Level | Coherent state | Exit evidence |
 |---|---|---|
-| L1 | Corpus compiler and versioned Skill IR | A real corpus compiles with stable identities and source spans. |
+| L1 | Corpus compiler and versioned Skill IR | **Implemented:** a real corpus compiles with stable identities, source spans, nested/block frontmatter support within the declared subset, and a deterministic artifact digest. |
 | L2 | Deterministic single-corpus auditor | Findings are reproducible and explainable from IR evidence. |
 | L3 | Typed composition graph | Redundancy, composition, reinforcement, and contradiction are separate relations. |
 | L4 | Mutation laboratory | Seeded defects produce expected killed/survived results. |
@@ -135,7 +135,7 @@ SkillIR:
       source_spans: []
 ```
 
-The IR must preserve raw text and source spans. Normalization creates analysis views; it must not erase the original evidence.
+The IR must preserve raw text and source spans. Normalization creates analysis views; it must not erase the original evidence. L1 currently supports the bounded frontmatter subset recorded in [ADR-0002](docs/decisions/0002-conservative-frontmatter-parser.md); it does not claim full YAML semantics.
 
 ## 5. Finding taxonomy
 

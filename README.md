@@ -90,7 +90,16 @@ The hackathon requires a working application running on Nebius Token Factory or 
 
 ## Current state
 
-This repository currently contains the project map, technical contract, competitive boundary, source record, evaluation plan, decision records, and red-team charter. Implementation begins only after these documents stabilize the destination and its invariants.
+This repository now has the first coherent implementation level: the L1 corpus compiler emits a versioned, source-addressable Skill IR with deterministic SHA-256 artifact digests. It has been exercised against the local real corpus (103 skills, 140 extracted normative lines, and 175 checks under the current parser scope). The deeper audit, mutation, behavioral, and UI levels remain explicitly in progress.
+
+### Run L1 locally
+
+```bash
+PYTHONPATH=src python3 -m pytest -q
+PYTHONPATH=src python3 -m crucible.cli /path/to/skill-corpus > audit-artifact.json
+```
+
+The current corpus numbers are an observed run, not a universal benchmark. See the parser boundary in [ADR-0002](docs/decisions/0002-conservative-frontmatter-parser.md).
 
 The intended stopping rule is deliberate: under a deadline, reach fewer complete levels rather than many disposable slices. Every level must remain useful and compatible with the final system.
 

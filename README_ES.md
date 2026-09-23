@@ -49,6 +49,10 @@ Esta versión es una adaptación de trabajo en español. La especificación púb
 
 Ver el detalle completo en el [Technical README](TECHNICAL.md) y el mapa de construcción en [ROADMAP.md](docs/ROADMAP.md).
 
+## Estado de implementación
+
+Ya existe el primer nivel coherente: el compilador L1 transforma un corpus real en una Skill IR versionada, con source spans y digest SHA-256 determinista. El corpus local probado produjo 103 skills, 140 líneas normativas extraídas y 175 checks bajo el scope actual del parser. La auditoría profunda, mutaciones, comportamiento y UI siguen explícitamente en progreso.
+
 ## Principio de construcción
 
 El destino es un sistema completo de verificación de metodología. El tiempo decide hasta qué nivel coherente llegamos; no convierte los niveles no alcanzados en prototipos descartables. Cada nivel debe ser útil, compatible con el siguiente y conservar los invariantes anteriores.
