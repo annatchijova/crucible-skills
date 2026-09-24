@@ -259,7 +259,9 @@ def _check_requirement_without_check(
         checks = skill["checks"]
         if not rules or checks:
             continue
-        normative = [r for r in rules if r["modality"] in ("MUST", "SHOULD")]
+        # All extracted rules are normative except MAY, which is
+        # permissive ("you may do this") rather than a requirement.
+        normative = [r for r in rules if r["modality"] != "MAY"]
         if not normative:
             continue
         first_rule = normative[0]
@@ -271,7 +273,7 @@ def _check_requirement_without_check(
             source_span=first_rule["source_span"],
             rule_id=first_rule["id"],
             evidence=(
-                f"skill has {len(normative)} MUST/SHOULD rule(s) but "
+                f"skill has {len(normative)} normative rule(s) but "
                 f"0 extracted checks"
             ),
             violated_invariant=(
@@ -332,19 +334,20 @@ def _check_methodological_vacuity(
 ) -> list[dict[str, Any]]:
     """A skill with normative rules but zero procedural steps and zero checks.
 
-    This detects skills that say what to do (MUST/SHOULD) but never say how
-    (no steps, no procedure, no verification). The skill is methodologically
-    vacuous: it is a wish, not a method.
+    This detects skills that say what to do (normative rules in any style:
+    RFC-2119 modals, always/never starters, or imperative constraint verbs)
+    but never say how (no steps, no procedure, no verification). The skill
+    is methodologically vacuous: it is a wish, not a method.
     """
     findings: list[dict[str, Any]] = []
     for skill in skills:
         rules = skill["rules"]
         if not rules:
             continue
-        normative = [
-            r for r in rules
-            if r["modality"] in ("MUST", "SHOULD", "MUST_NOT", "SHOULD_NOT")
-        ]
+        # All extracted rules are normative except MAY, which is
+        # permissive. The modality distinguishes the style (MUST, NEVER,
+        # ALWAYS, IMPERATIVE, etc.) but all express a normative constraint.
+        normative = [r for r in rules if r["modality"] != "MAY"]
         if not normative:
             continue
         steps = skill.get("procedural_steps", [])
@@ -368,10 +371,10 @@ def _check_methodological_vacuity(
                 "execute its normative rules, not just what to require"
             ),
             limitation=(
-                "procedural step extraction is section-heading and "
-                "numbered-list based; a skill with embedded procedural "
-                "prose (no ## Steps section, no numbered list) will be "
-                "a false positive"
+                "procedural step extraction is pattern-based (section "
+                "headings, numbered lists, and action-verb bullets); a "
+                "skill with embedded procedural prose that does not "
+                "match these patterns will be a false positive"
             ),
         ))
     return findings
@@ -581,8 +584,10 @@ def _check_semantic_redundancy(
 # ---------------------------------------------------------------------------
 
 # Modalities and their polarity: positive = "do X", negative = "don't do X".
-_POSITIVE_MODALITIES = frozenset({"MUST", "SHOULD"})
-_NEGATIVE_MODALITIES = frozenset({"MUST_NOT", "SHOULD_NOT"})
+# Style-agnostic: covers RFC-2119 modals, absoluteness starters, and
+# imperative constraint verbs.
+_POSITIVE_MODALITIES = frozenset({"MUST", "SHOULD", "ALWAYS", "IMPERATIVE"})
+_NEGATIVE_MODALITIES = frozenset({"MUST_NOT", "SHOULD_NOT", "NEVER"})
 
 
 def _rule_polarity(modality: str) -> str:
@@ -897,13 +902,13 @@ def _check_description_body_gap(
     This is the most extreme form of description-body gap: the description
     promises something, but the body has no extractable normative
     structure at all. The skill says what it does but the body has no
-    MUST/SHOULD rules, no checks, and no procedural steps.
+    normative rules (RFC-2119 modals, always/never starters, or
+    imperative constraint verbs), no checks, and no procedural steps.
 
     The check is CANDIDATE, not CONFIRMED, because the L1 extractor is
     lexical and conservative: a skill with zero extracted rules may use
-    non-RFC-2119 normative language (e.g., "always", "never", "ensure")
-    that the extractor does not capture. The finding documents this
-    limitation.
+    normative language in a form the extractor does not yet recognize.
+    The finding documents this limitation.
 
     This is distinct from METHODOLOGICAL_VACUITY, which detects skills
     WITH rules but WITHOUT steps or checks. DESCRIPTION_BODY_GAP detects
@@ -942,10 +947,10 @@ def _check_description_body_gap(
             ),
             limitation=(
                 "the L1 extractor is lexical and conservative; a skill "
-                "with zero extracted rules may use non-RFC-2119 normative "
-                "language (e.g., always, never, ensure) that the "
-                "extractor does not capture; cannot distinguish "
-                "extractor scope from a real description-body gap"
+                "with zero extracted rules may use normative language in "
+                "a form the extractor does not yet recognize; cannot "
+                "distinguish extractor scope from a real description-body "
+                "gap"
             ),
         ))
     return findings
@@ -1312,12 +1317,19 @@ def _check_overclaim(
     "never", "100%", "guaranteed", "failsafe", or "bulletproof" without
     any qualification (may, might, typically, except, unless, etc.).
     Absolute claims in methodology are a defect because no method is
-    universally correct — there are always boundary conditions,
+    universally correct -- there are always boundary conditions,
     failure modes, and exceptions.
 
     The check scans rule text for absolute claim patterns. If a
     qualification pattern is present in the same rule, the finding is
     suppressed.
+
+    Style-agnostic note: when a rule's modality is ALWAYS or NEVER, the
+    "always"/"never" at the start of the rule IS the modality (a
+    normative instruction like "Always validate inputs"), not a
+    descriptive overclaim. The "always" and "never" patterns are skipped
+    for those rules; the other overclaim patterns (100%, guaranteed,
+    failsafe, bulletproof, etc.) still apply.
 
     Limitation: the check is pattern-based. A skill may make an absolute
     claim using vocabulary not captured by the patterns, or may qualify
@@ -1329,7 +1341,18 @@ def _check_overclaim(
         source_path = skill["identity"]["source_path"]
         for rule in skill.get("rules", []):
             text = rule.get("text", "")
-            has_overclaim = any(p.search(text) for p in _OVERCLAIM_PATTERNS)
+            modality = rule.get("modality", "")
+            # For ALWAYS/NEVER rules, "always"/"never" is the modality,
+            # not a descriptive overclaim. Skip those patterns but keep
+            # the rest (100%, guaranteed, failsafe, etc.).
+            if modality in ("ALWAYS", "NEVER"):
+                patterns = [
+                    p for p in _OVERCLAIM_PATTERNS
+                    if not p.search("always") and not p.search("never")
+                ]
+            else:
+                patterns = _OVERCLAIM_PATTERNS
+            has_overclaim = any(p.search(text) for p in patterns)
             if not has_overclaim:
                 continue
             has_qualification = any(p.search(text) for p in _QUALIFICATION_PATTERNS)
@@ -1337,7 +1360,7 @@ def _check_overclaim(
                 continue
             # Identify which pattern matched for evidence.
             matched = next(
-                p.pattern for p in _OVERCLAIM_PATTERNS if p.search(text)
+                p.pattern for p in patterns if p.search(text)
             )
             findings.append(_finding(
                 cls="OVERCLAIM",

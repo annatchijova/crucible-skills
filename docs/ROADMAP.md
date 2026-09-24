@@ -83,11 +83,11 @@ to rule tokens; the real corpus produces 2 CANDIDATE findings (both
 false positives, documented as CANDIDATE with limitation).
 DESCRIPTION_BODY_GAP detects skills with substantive descriptions but
 zero extractable rules, checks, and procedural steps; the real corpus
-produces 27 CANDIDATE findings (28%, all honest CANDIDATEs with the
+produces 15 CANDIDATE findings (all honest CANDIDATEs with the
 conservative-extractor limitation documented). CHECK_WITHOUT_ORACLE
 extracts oracle_kind (question, checkbox, command, unknown) from each
 check text and flags checks with oracle_kind "unknown"; the real corpus
-produces 16 CANDIDATE findings (9% of checks). CLAIM_WITHOUT_PROVENANCE
+produces 16 CANDIDATE findings. CLAIM_WITHOUT_PROVENANCE
 extracts claims (percentage, time, count, standard, year) from rule text
 and flags claims without provenance indicators; the real corpus produces
 0 findings. The six engineering/methodology checks (UNBOUNDED_RETRY,
@@ -97,9 +97,25 @@ and procedural step text for engineering anti-patterns: unbounded retry,
 LLM as sole decision authority, absolute claims without qualification,
 methods without failure modes, non-deterministic instructions without
 anchors, and irreversible actions without review bounds. On the real
-corpus (88 skills), they produce 25 CANDIDATE findings: 4 UNBOUNDED_RETRY,
-2 OVERCLAIM, 3 NON_DETERMINISTIC_INSTRUCTION, 16
+corpus (88 skills), they produce 27 CANDIDATE findings: 4 UNBOUNDED_RETRY,
+2 OVERCLAIM, 3 NON_DETERMINISTIC_INSTRUCTION, 18
 IRREVERSIBLE_WITHOUT_REVIEW, 0 LLM_IN_DECISION_PATH, 0 MISSING_FAILURE_MODE.
+
+L9 (style-agnostic extraction) extends the L1 compiler to recognize
+normative language beyond RFC-2119 modals: absoluteness starters (Never,
+Always, Do not, Don't), imperative constraint verbs (Ensure, Require,
+Prevent, Avoid, Validate, ...), prose-embedded procedural steps
+(action-verb bullets outside Steps sections), and verification statements
+outside Checks sections. Code blocks are excluded from all extraction.
+The auditor checks (METHODOLOGICAL_VACUITY, REQUIREMENT_WITHOUT_CHECK,
+DESCRIPTION_BODY_GAP, CONDITIONAL_CONTRADICTION, OVERCLAIM) were
+recalibrated to treat all extracted rules as normative regardless of
+style, except MAY which is permissive. OVERCLAIM skips the
+"always"/"never" pattern for rules whose modality is ALWAYS or NEVER
+(those are normative instructions, not descriptive overclaims). On the
+real corpus, this reduced false positives: skills with 0 extractable
+rules dropped from 73 to 41 (83% to 47%), DESCRIPTION_BODY_GAP from 27
+to 15, and METHODOLOGICAL_VACUITY from a higher count to 2.
 
 **Must preserve:** L1 invariants (determinism, source spans, candidate status,
 identity checks, artifact determinism), plus audit determinism, no floats, no

@@ -149,7 +149,7 @@ def test_gap_has_limitation_documented() -> None:
     assert len(gaps) >= 1
     assert gaps[0]["limitation"] is not None
     assert "conservative" in gaps[0]["limitation"].lower()
-    assert "non-RFC-2119" in gaps[0]["limitation"]
+    assert "does not yet recognize" in gaps[0]["limitation"]
 
 
 # ---------------------------------------------------------------------------

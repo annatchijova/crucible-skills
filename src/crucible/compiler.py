@@ -18,6 +18,84 @@ _BULLET = re.compile(r"^\s*[-*+]\s+(?P<value>.+?)\s*$")
 _NUMBERED = re.compile(r"^\s*(?P<num>\d+)\.\s+(?P<value>.+?)\s*$")
 _PROCEDURAL_SECTIONS = {"steps", "procedure", "how to", "how", "process", "workflow", "method"}
 
+# Code fence detection for skipping code blocks during extraction.
+_CODE_FENCE = re.compile(r"^```")
+
+# Normative imperative verbs — verbs that, when at the start of a line
+# (after stripping markdown), indicate a normative constraint. These are
+# NOT action verbs (read, write, create, build) which indicate procedural
+# steps. They are constraint verbs: ensure, require, prevent, reject, etc.
+_NORMATIVE_IMPERATIVE_VERBS = {
+    "ensure", "require", "enforce", "maintain", "preserve", "protect",
+    "guard", "isolate", "contain", "limit", "restrict", "constrain",
+    "bound", "avoid", "prevent", "reject", "block", "deny", "abort",
+    "rollback", "validate", "pin", "seal", "guarantee",
+}
+
+# Negative starters — lines that start with these words are normative
+# rules (prohibitions or requirements). Each entry is (regex, modality).
+_NORMATIVE_STARTERS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?never\b", re.IGNORECASE), "NEVER"),
+    (re.compile(r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?always\b", re.IGNORECASE), "ALWAYS"),
+    (re.compile(r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?do\s+not\b", re.IGNORECASE), "MUST_NOT"),
+    (re.compile(r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?don't\b", re.IGNORECASE), "MUST_NOT"),
+]
+
+# Imperative starter — lines that start with a normative verb.
+_IMPERATIVE_STARTER = re.compile(
+    r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?"
+    r"(?:" + "|".join(sorted(_NORMATIVE_IMPERATIVE_VERBS)) + r")\b",
+    re.IGNORECASE,
+)
+
+# Verification starter — lines that start with a verification verb.
+# Used to extract checks from anywhere in the body, not just Checks sections.
+_VERIFICATION_STARTER = re.compile(
+    r"^\s*(?:[-*+]\s+)?(?:\d+\.\s+)?"
+    r"(?:verify|check|test|assert|confirm|demonstrate|prove)\b",
+    re.IGNORECASE,
+)
+
+# Action verbs — first word of a bullet that indicates a procedural step
+# (rather than an explanatory or descriptive bullet). These are concrete
+# doing-words, distinct from the normative constraint verbs above. A
+# bullet starting with one of these is treated as a prose-embedded step
+# when it appears outside a dedicated procedural section.
+_ACTION_VERBS = {
+    "run", "execute", "build", "create", "generate", "write", "edit",
+    "read", "load", "save", "delete", "remove", "install", "deploy",
+    "start", "stop", "restart", "configure", "set", "update", "upgrade",
+    "downgrade", "commit", "push", "pull", "merge", "rebase", "tag",
+    "release", "publish", "scan", "audit", "inspect", "examine",
+    "analyze", "review", "compare", "diff", "apply", "revert", "rollback",
+    "validate", "verify", "check", "test", "assert", "confirm",
+    "demonstrate", "prove", "extract", "compile", "parse", "serialize",
+    "deserialize", "encode", "decode", "encrypt", "decrypt", "sign",
+    "authenticate", "authorize", "grant", "revoke", "issue",
+    "reset", "clear", "flush", "purge", "archive", "restore", "backup",
+    "copy", "move", "rename", "list", "show", "print", "log", "report",
+    "notify", "alert", "warn", "fail", "abort", "raise", "throw",
+    "catch", "handle", "retry", "skip", "continue", "break", "return",
+    "yield", "await", "call", "invoke", "trigger", "schedule", "queue",
+    "fetch", "request", "send", "receive", "listen", "connect",
+    "disconnect", "open", "close", "mount", "unmount", "format",
+    "initialize", "teardown", "shutdown", "boot",
+    "navigate", "select", "choose", "pick", "enter", "type", "paste",
+    "click", "tap", "scroll", "zoom", "filter", "sort", "group",
+    "aggregate", "summarize", "transform", "convert", "translate",
+    "map", "reduce", "join", "split", "partition", "shard", "replicate",
+    "cache", "invalidate", "refresh", "sync", "synchronize", "poll",
+    "watch", "monitor", "observe", "measure", "record", "capture",
+    "replay", "simulate", "emulate", "fuzz", "mutate", "patch", "fix",
+    "repair", "refactor", "optimize", "profile", "benchmark", "trace",
+    "debug", "dump", "export", "import", "upload", "download",
+    "transfer", "stream", "pipe", "redirect", "forward", "route",
+    "block", "allow", "deny", "accept", "reject", "drop", "pass",
+    "enforce", "require", "ensure", "maintain", "preserve", "protect",
+    "guard", "isolate", "contain", "limit", "restrict", "constrain",
+    "bound", "avoid", "prevent", "pin", "seal", "guarantee",
+}
+
 
 def compile_corpus(root: Path | str) -> dict[str, Any]:
     """Compile every ``SKILL.md`` below *root* into a canonical artifact."""
@@ -69,7 +147,7 @@ def _compile_skill(path: Path, root: Path) -> dict[str, Any]:
         "trigger": _extract_trigger(frontmatter.get("description", "")),
         "body_text": body_text,
         "rules": _extract_rules(lines, body_start),
-        "checks": _extract_checks(lines, sections),
+        "checks": _extract_checks(lines, sections, body_start),
         "procedural_steps": _extract_procedural_steps(lines, sections, body_start),
         "relations": {
             "composes_with": _extract_relations(lines, sections, "composes with"),
@@ -147,6 +225,19 @@ def _section_ranges(lines: list[str], body_start: int) -> dict[str, tuple[int, i
     return ranges
 
 
+def _code_block_lines(lines: list[str], body_start: int) -> set[int]:
+    """Return the set of line indices inside code blocks (between ``` fences)."""
+    code_lines: set[int] = set()
+    in_code = False
+    for index in range(body_start, len(lines)):
+        if _CODE_FENCE.match(lines[index]):
+            in_code = not in_code
+            continue
+        if in_code:
+            code_lines.add(index)
+    return code_lines
+
+
 # Trigger extraction patterns. These capture the clause that describes
 # when the skill should be activated, from the description text.
 _TRIGGER_PATTERNS = [
@@ -181,14 +272,36 @@ def _extract_trigger(description: str) -> dict[str, Any]:
 
 
 def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
+    """Extract normative rules from a skill body.
+
+    Three extraction styles are recognized, in priority order:
+
+    1. RFC-2119 modals (MUST, SHOULD, MAY) — the original style.
+    2. Negative starters (Never, Always, Do not, Don't) — common in
+       prose-style skills that use absoluteness instead of modals.
+    3. Imperative starters (Ensure, Require, Prevent, Avoid, Validate,
+       ...) — normative constraint verbs at the start of a line.
+
+    All three produce rules with extraction_status "candidate". Styles 2
+    and 3 use modality "NEVER", "ALWAYS", "MUST_NOT", or "IMPERATIVE".
+    The subject is "" for non-RFC-2119 rules (no NLP object extraction).
+
+    Code blocks (between ``` fences) and headings are skipped.
+    """
     rules: list[dict[str, Any]] = []
+    code_lines = _code_block_lines(lines, body_start)
     for index in range(body_start, len(lines)):
-        match = _MODALITY.search(lines[index])
+        if index in code_lines:
+            continue
+        line = lines[index]
+        if _HEADING.match(line):
+            continue
+        # 1. RFC-2119 modals (existing behavior).
+        match = _MODALITY.search(line)
         if match:
             raw_modality = match.group(1)
-            # Normalize "MUST NOT" -> "MUST_NOT", "SHOULD NOT" -> "SHOULD_NOT"
             modality = raw_modality.replace(" ", "_").upper()
-            text = lines[index].strip()
+            text = line.strip()
             subject = _extract_subject(text, raw_modality)
             conditions = _extract_conditions(text)
             claims = _extract_claims(text)
@@ -201,6 +314,43 @@ def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
                 "claims": claims,
                 "text": text,
                 "source_span": {"line": index + 1, "column": match.start(1) + 1},
+            })
+            continue
+        # 2. Negative starters (Never, Always, Do not, Don't).
+        neg_matched = False
+        for pattern, neg_modality in _NORMATIVE_STARTERS:
+            if pattern.match(line):
+                text = line.strip()
+                conditions = _extract_conditions(text)
+                claims = _extract_claims(text)
+                rules.append({
+                    "id": f"rule-{len(rules) + 1:04d}",
+                    "extraction_status": "candidate",
+                    "modality": neg_modality,
+                    "subject": "",
+                    "conditions": conditions,
+                    "claims": claims,
+                    "text": text,
+                    "source_span": {"line": index + 1, "column": 1},
+                })
+                neg_matched = True
+                break
+        if neg_matched:
+            continue
+        # 3. Imperative starters (normative constraint verbs).
+        if _IMPERATIVE_STARTER.match(line):
+            text = line.strip()
+            conditions = _extract_conditions(text)
+            claims = _extract_claims(text)
+            rules.append({
+                "id": f"rule-{len(rules) + 1:04d}",
+                "extraction_status": "candidate",
+                "modality": "IMPERATIVE",
+                "subject": "",
+                "conditions": conditions,
+                "claims": claims,
+                "text": text,
+                "source_span": {"line": index + 1, "column": 1},
             })
     return rules
 
@@ -341,9 +491,16 @@ def _extract_procedural_steps(
     - Sections titled "## Steps", "## Procedure", "## How to", "## Process", etc.
     - Numbered lists anywhere in the body (1. ... 2. ...)
     - Bullet lists with action verbs in procedural sections
+    - Bullet lists elsewhere whose text begins with an action verb
+      (prose-embedded steps in non-procedural sections)
+
+    The action-verb heuristic for non-procedural bullets avoids extracting
+    explanatory bullets ("This is important because ...") as steps. Code
+    blocks and headings are skipped.
     """
     steps: list[dict[str, Any]] = []
     seen_lines: set[int] = set()
+    code_lines = _code_block_lines(lines, body_start)
 
     # 1. Extract from procedural sections.
     for title, (start, end) in sections.items():
@@ -374,7 +531,7 @@ def _extract_procedural_steps(
 
     # 2. Extract numbered lists from anywhere in the body.
     for index in range(body_start, len(lines)):
-        if index in seen_lines:
+        if index in seen_lines or index in code_lines:
             continue
         num_match = _NUMBERED.match(lines[index])
         if num_match:
@@ -385,11 +542,61 @@ def _extract_procedural_steps(
             })
             seen_lines.add(index)
 
+    # 3. Extract action-verb bullets from non-procedural sections
+    #    (prose-embedded steps). This catches skills that embed their
+    #    procedure in ordinary prose bullets rather than a dedicated
+    #    "Steps" section. The first word must be an action verb to
+    #    avoid extracting explanatory bullets. Bullets in Checks or
+    #    Verification sections are skipped — those are checks, not
+    #    steps, and are extracted by _extract_checks.
+    check_section_lines: set[int] = set()
+    for title, (start, end) in sections.items():
+        if "check" in title or "verification" in title:
+            check_section_lines.update(range(start, end))
+    for index in range(body_start, len(lines)):
+        if index in seen_lines or index in code_lines:
+            continue
+        if index in check_section_lines:
+            continue
+        line = lines[index]
+        if _HEADING.match(line):
+            continue
+        bullet_match = _BULLET.match(line)
+        if not bullet_match:
+            continue
+        text = bullet_match.group("value")
+        first_word = text.split(" ", 1)[0].lower().strip(".,;:()")
+        if first_word in _ACTION_VERBS:
+            steps.append({
+                "id": f"step-{len(steps) + 1:04d}",
+                "text": text,
+                "source_span": {"line": index + 1, "column": 1},
+            })
+            seen_lines.add(index)
+
     return steps
 
 
-def _extract_checks(lines: list[str], sections: dict[str, tuple[int, int]]) -> list[dict[str, Any]]:
+def _extract_checks(
+    lines: list[str],
+    sections: dict[str, tuple[int, int]],
+    body_start: int,
+) -> list[dict[str, Any]]:
+    """Extract checks from a skill body.
+
+    Checks are found in:
+    - Sections titled "## Checks" or "## Verification" (existing behavior).
+    - Lines anywhere in the body that start with a verification verb
+      (verify, check, test, assert, confirm, demonstrate, prove).
+
+    Code blocks and headings are skipped. Lines already extracted from
+    a Checks/Verification section are not re-extracted.
+    """
     checks: list[dict[str, Any]] = []
+    seen_lines: set[int] = set()
+    code_lines = _code_block_lines(lines, body_start)
+
+    # 1. Extract from Checks/Verification sections.
     for title, (start, end) in sections.items():
         if "check" not in title and "verification" not in title:
             continue
@@ -403,6 +610,28 @@ def _extract_checks(lines: list[str], sections: dict[str, tuple[int, int]]) -> l
                     "oracle_kind": _extract_oracle_kind(text),
                     "source_span": {"line": index + 1, "column": 1},
                 })
+                seen_lines.add(index)
+
+    # 2. Extract verification-starter lines from anywhere in the body.
+    for index in range(body_start, len(lines)):
+        if index in seen_lines or index in code_lines:
+            continue
+        line = lines[index]
+        if _HEADING.match(line):
+            continue
+        if not _VERIFICATION_STARTER.match(line):
+            continue
+        # Strip leading bullet/number markers for the check text.
+        text = line.strip()
+        text = re.sub(r"^\s*(?:[-*+]\s+|\d+\.\s+)", "", text)
+        checks.append({
+            "id": f"check-{len(checks) + 1:04d}",
+            "text": text,
+            "oracle_kind": _extract_oracle_kind(text),
+            "source_span": {"line": index + 1, "column": 1},
+        })
+        seen_lines.add(index)
+
     return checks
 
 
