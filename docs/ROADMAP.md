@@ -92,6 +92,38 @@ LLM, sealed artifact, and honest abstention.
 and honest abstention for unsupported semantics. Cross-process digest verified
 identical. See [L2 red-team review](red-team/2026-09-23-l2-auditor-review.md).
 
+## L2.5 — Semantic redundancy confirmation layer
+
+**Outcome:** CANDIDATE findings from the deterministic L2 layer can be
+confirmed or rejected by an LLM executor, without the LLM entering the
+decision path.
+
+**Status:** implemented. The confirmation layer (`confirm.py`) takes
+SEMANTIC_REDUNDANCY CANDIDATEs from the L2 audit and asks an executor
+whether each pair is semantically redundant. The confirmation is a
+separate artifact (`crucible-confirmation/v1`) with its own SHA-256
+digest. The L2 audit artifact is NEVER modified — the confirmation is
+an OBSERVATION, not a promotion to CONFIRMED.
+
+Two executors:
+- `NebiusConfirmExecutor`: calls Nebius Token Factory with
+  `nvidia/nemotron-3-super-120b-a12b`. Requires `NEBIUS_API_KEY`. If
+  not present, the confirmation is BLOCKED, not simulated.
+- `MockConfirmExecutor`: deterministic heuristic (line overlap >= 80%
+  → CONFIRMED). For testing without external dependencies.
+
+The real corpus produces 0 SEMANTIC_REDUNDANCY CANDIDATEs (the
+deterministic threshold of 2/3 is exigent), so the confirmation layer
+has 0 confirmations. Cross-process determinism confirmed.
+
+**Must preserve:** L2 invariants (sealed audit, no LLM in decision
+path, no floats, honest BLOCKED status), plus confirmation artifact
+determinism and L2 audit immutability.
+
+**Exit evidence:** 14 falsifiable tests cover schema, LLM-out-of-
+decision-path, mock executor, Nebius BLOCKED, no candidates, summary,
+determinism, and no floats. See [L2.5 red-team review](red-team/2026-09-23-semantic-redundancy-confirmation-review.md).
+
 ## L3 — Composition graph
 
 **Outcome:** the corpus is analyzed as a system rather than as isolated files.
