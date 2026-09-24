@@ -23,6 +23,12 @@ from .behavioral import (
 )
 from .bob import BOB_VERSION, RuleBasedProposer, run_bob_workflow
 from .compiler import SCHEMA_VERSION, compile_corpus
+from .confirm import (
+    CONFIRMATION_VERSION,
+    MockConfirmExecutor,
+    NebiusConfirmExecutor,
+    confirm_semantic_redundancy,
+)
 from .graph import GRAPH_VERSION, build_composition_graph
 from .ir import digest_payload
 from .mutation import MUTATION_VERSION, run_mutation_lab
@@ -111,6 +117,26 @@ def run_full_report(
             "edge_count": len(graph["edges"]),
             "node_count": len(graph["nodes"]),
             "graph_property_count": len(graph["graph_properties"]),
+        }
+
+        # L2.5: semantic redundancy confirmation layer.
+        # Uses the mock executor for determinism in the composite report.
+        # The Nebius executor is used when NEBIUS_API_KEY is available.
+        confirm_executor = NebiusConfirmExecutor()
+        if not confirm_executor.is_available():
+            confirm_executor = MockConfirmExecutor()
+        confirmation = confirm_semantic_redundancy(audit, ir, confirm_executor)
+        report["levels"]["L2.5"] = {
+            "confirmation_version": confirmation["schema_version"],
+            "confirmation_digest": confirmation["confirmation_digest"],
+            "source_audit_digest": confirmation["source_audit_digest"],
+            "status": confirmation["status"],
+            "executor_model": confirmation["executor"]["model"],
+            "total_confirmations": confirmation["summary"]["total"],
+            "confirmed": confirmation["summary"]["confirmed"],
+            "rejected": confirmation["summary"]["rejected"],
+            "unclear": confirmation["summary"]["unclear"],
+            "blocked": confirmation["summary"]["blocked"],
         }
 
     # L4: mutation lab (uses built-in fixture).

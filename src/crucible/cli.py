@@ -9,6 +9,11 @@ from .auditor import audit_corpus
 from .behavioral import LocalExecutor, NebiusExecutor, run_behavioral_differential
 from .bob import LLMProposer, RuleBasedProposer, run_bob_workflow
 from .compiler import compile_corpus
+from .confirm import (
+    MockConfirmExecutor,
+    NebiusConfirmExecutor,
+    confirm_semantic_redundancy,
+)
 from .graph import build_composition_graph
 from .mutation import run_mutation_lab
 from .repair_loop import run_repair_loop
@@ -76,6 +81,16 @@ def main() -> int:
         action="store_true",
         help="use the LLM proposer (Nemotron via Nebius) instead of rule-based",
     )
+    parser.add_argument(
+        "--confirm",
+        action="store_true",
+        help="run the L2.5 semantic redundancy confirmation layer on the audit",
+    )
+    parser.add_argument(
+        "--mock-confirm",
+        action="store_true",
+        help="use the deterministic mock executor for the confirmation layer (for testing)",
+    )
     args = parser.parse_args()
 
     if args.view:
@@ -127,6 +142,19 @@ def main() -> int:
             executor = None  # let the report decide (Nebius or LocalExecutor fallback)
         report = run_full_report(corpus_root=args.root, executor=executor)
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    if args.confirm:
+        if not args.root:
+            parser.error("root is required with --confirm")
+        artifact = compile_corpus(args.root)
+        audit = audit_corpus(artifact)
+        if args.mock_confirm:
+            executor = MockConfirmExecutor()
+        else:
+            executor = NebiusConfirmExecutor()
+        confirmation = confirm_semantic_redundancy(audit, artifact, executor)
+        print(json.dumps(confirmation, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
     if not args.root:
