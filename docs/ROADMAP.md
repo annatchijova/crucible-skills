@@ -388,6 +388,41 @@ status, viewer HTML output, viewer no-computation invariant, and viewer
 works with any artifact type. Cross-process digest verified identical.
 See [L8 red-team review](red-team/2026-09-23-l8-ci-viewer-review.md).
 
+## L11 — Public API and demo UI
+
+**Status: complete.**
+
+L11 exposes the deterministic scanner as a public HTTP API with three input
+modes: (1) paste a single SKILL.md, (2) scan a directory of skills, (3)
+scan the user's installed skills (~/.config/devin/skills/,
+~/.claude/skills/, ~/.local/share/devin/skills/). The API is a thin
+wrapper over the L1 compiler and L2 auditor: it compiles, audits, and
+returns the sealed artifact. It does NOT make decisions, does NOT call
+an LLM, and does NOT modify the input. Input is validated at the
+boundary: empty, non-string, oversized (>1MB), and nonexistent-directory
+inputs are rejected with a clear error before reaching the compiler.
+
+The demo UI is a read-only HTML page served at /. It calls the API and
+renders findings. No computation happens in the browser beyond fetching
+and displaying. The UI is for product demonstration, not for end-user
+consumption.
+
+CLI commands: `--scan-skill` (reads SKILL.md from stdin), `--scan-installed`
+(scans installed skills), `--serve [HOST:PORT]` (starts the HTTP API
+server).
+
+A Dockerfile packages the API into a single container with no external
+dependencies beyond Python and the optional `api` extras (fastapi,
+uvicorn). The container runs `crucible --serve 0.0.0.0:8000`.
+
+**Must preserve:** all L1-L8 invariants. The API is stateless: no input
+is retained after the response. The audit digest is identical whether
+the audit is run via the API, the CLI, or directly.
+
+**Exit evidence:** 19 falsifiable tests cover all three input modes,
+boundary validation, determinism, the FastAPI app factory, endpoint
+presence, and API-vs-direct audit digest equality. 368 tests pass.
+
 ## Cross-level invariants
 
 Every level must retain:

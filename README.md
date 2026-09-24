@@ -103,6 +103,9 @@ This repository has the first six coherent implementation levels:
 - **L6 — Bob workflow:** Bob receives audit findings, proposes a repair (rule-based or LLM via Nebius), and Crucible deterministically re-audits and accepts or rejects. Acceptance criteria: the targeted finding is gone AND no new findings AND the corpus compiles. Bob proposes; Crucible decides.
 - **L7 — Closed repair loop:** integrates L6 and L5 into a single closed workflow. Bob proposes a repair; Crucible re-audits deterministically (L6); if the deterministic gate passes, the loop runs a behavioral replay (L5 property oracle) comparing the repaired skill against the original. A repair that passes deterministic but fails behavioral is REJECTED with `BEHAVIORAL_REGRESSION`. Bob proposes; the property oracle observes; Crucible decides.
 - **L8 — CI and presentation:** a composite report generator runs the full L1-L7 pipeline and seals a `crucible-report/v1` artifact with all level digests. A read-only HTML viewer renders any sealed artifact JSON as a self-contained page (no computation, no `<script>` tags). A GitHub Actions CI workflow runs tests, generates the report, renders HTML, and uploads both as artifacts. No consumer has independent decision logic.
+- **L9 — Style-agnostic extraction:** the compiler recognizes normative language beyond RFC-2119 (Never, Always, Do not, imperative constraint verbs), prose-embedded procedural steps, and verification statements outside Checks sections. The auditor was recalibrated to treat all extracted rules as normative. On the real corpus, skills with 0 extractable rules dropped from 83% to 47%.
+- **L10 — Engineering defect taxonomy:** 8 new style-agnostic checks (SECRET_IN_OUTPUT, SILENT_FAILURE, HARDCODED_CREDENTIAL, UNBOUNDED_RESOURCE, UNVALIDATED_EXTERNAL_INPUT, MISSING_TIMEOUT, FLOATING_POINT_IN_DECISION_PATH, UNPINNED_DEPENDENCY) detect engineering defects that are objectively hazardous across all methodologies. 28 checks total.
+- **L11 — Public API and demo UI:** a FastAPI HTTP API with three input modes (single skill, directory, installed skills), a read-only demo UI, CLI commands (`--scan-skill`, `--scan-installed`, `--serve`), and a Dockerfile for single-container deployment. The API is stateless, validates input at the boundary, and produces audit digests identical to direct CLI invocation.
 
 L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. L6 accepts a rule-based repair for the REQUIREMENT_WITHOUT_CHECK finding; the LLM proposer is BLOCKED (no API key). L7 accepts a rule-based repair that passes both deterministic re-audit and behavioral replay; the LLM proposer and Nebius executor are BLOCKED (no API key). L8 produces a sealed composite report, a read-only HTML viewer, and a CI workflow. All levels are closed.
 
@@ -134,6 +137,15 @@ PYTHONPATH=src python3 -m crucible.cli /path/to/skill-corpus > graph-artifact.js
 PYTHONPATH=src python3 -m crucible.cli --no-graph /path/to/skill-corpus > audit-artifact.json
 # Compile only (L1 IR):
 PYTHONPATH=src python3 -m crucible.cli --compile-only /path/to/skill-corpus > ir.json
+# Scan a single SKILL.md from stdin (L11):
+cat SKILL.md | PYTHONPATH=src python3 -m crucible.cli --scan-skill > audit.json
+# Scan your installed skills (L11):
+PYTHONPATH=src python3 -m crucible.cli --scan-installed > installed-audit.json
+# Start the HTTP API server (L11, needs api extras: pip install -e ".[api]"):
+PYTHONPATH=src python3 -m crucible.cli --serve 127.0.0.1:8000
+# Then open http://127.0.0.1:8000 for the demo UI.
+# Or run via Docker (L11):
+docker build -t crucible . && docker run -p 8000:8000 crucible
 ```
 
 The current corpus numbers are an observed run, not a universal benchmark. See the parser boundary in [ADR-0002](docs/decisions/0002-conservative-frontmatter-parser.md).

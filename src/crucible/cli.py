@@ -92,12 +92,59 @@ def main() -> int:
         action="store_true",
         help="use the deterministic mock executor for the confirmation layer (for testing)",
     )
+    parser.add_argument(
+        "--scan-skill",
+        action="store_true",
+        help="scan a single SKILL.md from stdin (L11)",
+    )
+    parser.add_argument(
+        "--scan-installed",
+        action="store_true",
+        help="scan the user's installed skills (L11)",
+    )
+    parser.add_argument(
+        "--serve",
+        metavar="HOST:PORT",
+        nargs="?",
+        const="127.0.0.1:8000",
+        help="start the HTTP API server (L11)",
+    )
     args = parser.parse_args()
 
     if args.view:
         with open(args.view, encoding="utf-8") as f:
             artifact = json.load(f)
         print(render_artifact_html(artifact))
+        return 0
+
+    if args.serve is not None:
+        import uvicorn
+        from .api import create_app
+        app = create_app()
+        host, _, port = args.serve.partition(":")
+        port_num = int(port) if port else 8000
+        uvicorn.run(app, host=host, port=port_num)
+        return 0
+
+    if args.scan_skill:
+        import sys
+        from .api import scan_skill_text
+        skill_text = sys.stdin.read()
+        try:
+            result = scan_skill_text(skill_text)
+        except ValueError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        print(json.dumps(result["audit"], ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
+    if args.scan_installed:
+        from .api import scan_installed_skills
+        result = scan_installed_skills()
+        if result.get("error"):
+            print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
+            return 1
+        print(json.dumps(result["audit"], ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
     if args.mutate:
