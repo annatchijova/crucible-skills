@@ -8,6 +8,7 @@ are documented as explicit limitations rather than silently passed.
 
 from __future__ import annotations
 
+from fractions import Fraction
 from typing import Any
 
 from .ir import SCHEMA_VERSION, digest_payload
@@ -86,6 +87,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_structural_redundancy(skills))
     findings.extend(_check_methodological_vacuity(skills))
     findings.extend(_check_normative_conflict(skills))
+    findings.extend(_check_semantic_redundancy(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -450,6 +452,144 @@ def _check_normative_conflict(
                         "detected as conflicting"
                     ),
                 ))
+    return findings
+
+
+# Minimum Jaccard overlap (as a Fraction) for a SEMANTIC_REDUNDANCY candidate.
+# 2/3 means two skills share at least 2/3 of their meaningful tokens.
+_SEMANTIC_THRESHOLD = Fraction(2, 3)
+
+# Stopwords excluded from token sets to avoid inflating overlap on
+# common English words. This is a small deterministic list, not an NLP
+# pipeline.
+_STOPWORDS = frozenset({
+    "a", "an", "the", "and", "or", "but", "not", "is", "are", "was",
+    "were", "be", "been", "being", "have", "has", "had", "do", "does",
+    "did", "will", "would", "could", "should", "may", "might", "must",
+    "shall", "to", "of", "in", "on", "at", "by", "for", "with", "from",
+    "as", "into", "about", "than", "then", "so", "if", "but", "because",
+    "while", "this", "that", "these", "those", "it", "its", "they",
+    "them", "their", "we", "you", "he", "she", "his", "her", "our",
+    "your", "which", "who", "whom", "what", "where", "when", "how",
+    "why", "all", "any", "some", "no", "nor", "only", "own", "same",
+    "such", "too", "very", "can", "just",
+})
+
+
+def _tokenize(text: str) -> frozenset[str]:
+    """Extract a normalized token set from text for Jaccard comparison.
+
+    Lowercases, strips non-alphanumeric, drops stopwords and single-char
+    tokens. Returns a frozenset for deterministic ordering-independent
+    comparison.
+    """
+    tokens: set[str] = set()
+    for word in text.lower().split():
+        # Strip surrounding punctuation but keep internal hyphens.
+        cleaned = word.strip(".,;:!?\"'()[]{}<>/\\|`*_-#")
+        if len(cleaned) < 2:
+            continue
+        if cleaned in _STOPWORDS:
+            continue
+        tokens.add(cleaned)
+    return frozenset(tokens)
+
+
+def _jaccard(a: frozenset[str], b: frozenset[str]) -> Fraction:
+    """Jaccard similarity as an exact Fraction (no floats)."""
+    if not a and not b:
+        return Fraction(1, 1)
+    union = a | b
+    if not union:
+        return Fraction(0, 1)
+    intersection = a & b
+    return Fraction(len(intersection), len(union))
+
+
+def _skill_token_set(skill: dict[str, Any]) -> frozenset[str]:
+    """Build a token set from a skill's description + rule texts + check texts.
+
+    This is the lexical fingerprint used for semantic redundancy
+    comparison. It combines what the skill says it does (description),
+    what it requires (rules), and how it verifies (checks).
+    """
+    parts: list[str] = []
+    desc = skill.get("metadata", {}).get("description", "")
+    if desc:
+        parts.append(desc)
+    for rule in skill.get("rules", []):
+        parts.append(rule.get("text", ""))
+    for check in skill.get("checks", []):
+        parts.append(check.get("text", ""))
+    combined = " ".join(parts)
+    return _tokenize(combined)
+
+
+def _check_semantic_redundancy(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Two skills whose lexical fingerprint overlaps above the threshold.
+
+    This is the deterministic base for SEMANTIC_REDUNDANCY. It uses
+    Jaccard token overlap (computed with fractions.Fraction, no floats)
+    on the combined description + rules + checks text of each skill. A
+    pair with overlap >= 2/3 is a CANDIDATE finding: the two skills may
+    cover the same ground.
+
+    The LLM confirmation layer (deferred) would take each candidate and
+    ask the model whether the two skills are semantically redundant. The
+    deterministic check produces the candidate; the LLM confirms or
+    rejects. The LLM never enters the decision path alone.
+    """
+    if len(skills) < 2:
+        return []
+
+    # Precompute token sets for each skill.
+    skill_tokens: list[tuple[str, str, frozenset[str]]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        path = skill["identity"]["source_path"]
+        tokens = _skill_token_set(skill)
+        # Skip skills with empty token sets (no extractable content).
+        if tokens:
+            skill_tokens.append((name, path, tokens))
+
+    findings: list[dict[str, Any]] = []
+    for i in range(len(skill_tokens)):
+        for j in range(i + 1, len(skill_tokens)):
+            name_i, path_i, tokens_i = skill_tokens[i]
+            name_j, path_j, tokens_j = skill_tokens[j]
+            overlap = _jaccard(tokens_i, tokens_j)
+            if overlap < _SEMANTIC_THRESHOLD:
+                continue
+            # Report on the lexicographically smaller skill name.
+            if name_i <= name_j:
+                report_name, report_path = name_i, path_i
+            else:
+                report_name, report_path = name_j, path_j
+            # Format the fraction as "numerator/denominator" (no float).
+            overlap_str = f"{overlap.numerator}/{overlap.denominator}"
+            findings.append(_finding(
+                cls="SEMANTIC_REDUNDANCY",
+                epistemic_status="CANDIDATE",
+                skill=report_name,
+                source_path=report_path,
+                source_span=None,
+                rule_id=None,
+                evidence=(
+                    f"lexical Jaccard overlap {overlap_str} with "
+                    f"{name_j if report_name == name_i else name_i} "
+                    f"(threshold 2/3); combined description+rules+checks "
+                    f"tokens are highly similar"
+                ),
+                violated_invariant=None,
+                limitation=(
+                    "lexical token overlap is not semantic equivalence; "
+                    "two skills may share vocabulary while governing "
+                    "different scopes; an LLM confirmation layer is "
+                    "deferred and would confirm or reject each candidate"
+                ),
+            ))
     return findings
 
 
