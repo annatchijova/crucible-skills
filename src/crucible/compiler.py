@@ -341,12 +341,40 @@ def _extract_checks(lines: list[str], sections: dict[str, tuple[int, int]]) -> l
         for index in range(start, end):
             match = _BULLET.match(lines[index])
             if match:
+                text = match.group("value")
                 checks.append({
                     "id": f"check-{len(checks) + 1:04d}",
-                    "text": match.group("value"),
+                    "text": text,
+                    "oracle_kind": _extract_oracle_kind(text),
                     "source_span": {"line": index + 1, "column": 1},
                 })
     return checks
+
+
+# Oracle kind extraction. Each check is classified by how it can be
+# verified. The oracle_kind indicates what kind of oracle the check
+# implies:
+#   "question"    — the check is a question (has a question mark)
+#   "command"     — the check is a command (verify, assert, run, check,
+#                   confirm, test, query, inspect, does)
+#   "checkbox"    — the check is a checkbox item ([ ] or [x])
+#   "unknown"     — the check has no extractable oracle indicator
+_ORACLE_PATTERNS = [
+    (re.compile(r"\?\s*$"), "question"),
+    (re.compile(r"^\s*\[\s*[xX ]\s*\]"), "checkbox"),
+    (re.compile(r"\b(?:verify|assert|run|check|confirm|test|query|inspect|does|ensure|prove|validate|demonstrate)\b", re.IGNORECASE), "command"),
+]
+
+
+def _extract_oracle_kind(check_text: str) -> str:
+    """Classify a check by its implied oracle kind.
+
+    Returns "question", "checkbox", "command", or "unknown".
+    """
+    for pattern, kind in _ORACLE_PATTERNS:
+        if pattern.search(check_text):
+            return kind
+    return "unknown"
 
 
 def _extract_relations(lines: list[str], sections: dict[str, tuple[int, int]], section_name: str) -> list[str]:

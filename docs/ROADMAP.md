@@ -56,17 +56,18 @@ Initial checks:
 - semantic redundancy (lexical Jaccard overlap >= 2/3 between two skills);
 - conditional contradiction (same subject, overlapping conditions, opposite polarity);
 - scope-trigger mismatch (declared trigger shares zero tokens with rule content);
-- description-body gap (substantive description but zero extractable body structure).
+- description-body gap (substantive description but zero extractable body structure);
+- check without oracle (check text has no extractable verification indicator).
 
-Of these, twelve are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
+Of these, thirteen are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
 COMPOSITION_CYCLE, ORPHAN_SKILL, REQUIREMENT_WITHOUT_CHECK,
 STRUCTURAL_REDUNDANCY, METHODOLOGICAL_VACUITY, NORMATIVE_CONFLICT,
 SEMANTIC_REDUNDANCY, CONDITIONAL_CONTRADICTION, SCOPE_TRIGGER_MISMATCH,
-DESCRIPTION_BODY_GAP) and two are abstained with documented reasons
-(CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE). Abstention is
-honest: the current IR does not extract the fields these checks
-require. SEMANTIC_REDUNDANCY uses a deterministic lexical base (Jaccard
-with Fraction, no floats); an LLM confirmation layer is deferred.
+DESCRIPTION_BODY_GAP, CHECK_WITHOUT_ORACLE) and one is abstained with
+documented reasons (CLAIM_WITHOUT_PROVENANCE). Abstention is honest:
+the current IR does not extract the fields these checks require.
+SEMANTIC_REDUNDANCY uses a deterministic lexical base (Jaccard with
+Fraction, no floats); an LLM confirmation layer is deferred.
 CONDITIONAL_CONTRADICTION uses pattern-based condition extraction
 (except for, when, unless, if, for, during, while) with effective
 polarity computation. SCOPE_TRIGGER_MISMATCH uses trigger extraction
@@ -76,7 +77,10 @@ documented as CANDIDATE with limitation). DESCRIPTION_BODY_GAP detects
 skills with substantive descriptions but zero extractable rules,
 checks, and procedural steps; the real corpus produces 27 CANDIDATE
 findings (28%, all honest CANDIDATEs with the conservative-extractor
-limitation documented).
+limitation documented). CHECK_WITHOUT_ORACLE extracts oracle_kind
+(question, checkbox, command, unknown) from each check text and flags
+checks with oracle_kind "unknown"; the real corpus produces 16
+CANDIDATE findings (9% of checks).
 
 **Must preserve:** L1 invariants (determinism, source spans, candidate status,
 identity checks, artifact determinism), plus audit determinism, no floats, no

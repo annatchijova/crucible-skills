@@ -27,10 +27,6 @@ _CONFLICT_PAIRS = frozenset({
 # These are emitted in every artifact so consumers know what was NOT assessed.
 AUDIT_LIMITATIONS: list[dict[str, str]] = [
     {
-        "check_class": "CHECK_WITHOUT_ORACLE",
-        "reason": "The IR does not extract oracle_kind for checks.",
-    },
-    {
         "check_class": "CLAIM_WITHOUT_PROVENANCE",
         "reason": "The IR does not extract structured claims with numeric flags.",
     },
@@ -71,6 +67,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_conditional_contradiction(skills))
     findings.extend(_check_scope_trigger_mismatch(skills))
     findings.extend(_check_description_body_gap(skills))
+    findings.extend(_check_without_oracle(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -948,6 +945,69 @@ def _check_description_body_gap(
                 "extractor scope from a real description-body gap"
             ),
         ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# CHECK_WITHOUT_ORACLE
+# ---------------------------------------------------------------------------
+
+def _check_without_oracle(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A check whose oracle_kind is "unknown" — the check text has no
+    extractable indicator of how to verify it.
+
+    The IR now extracts oracle_kind for each check:
+    - "question"  — the check is a question (ends with ?)
+    - "checkbox"  — the check is a checkbox item ([ ] or [x])
+    - "command"   — the check contains a verification verb (verify,
+                    assert, run, check, confirm, test, query, inspect,
+                    does, ensure, prove, validate, demonstrate)
+    - "unknown"   — none of the above
+
+    A check with oracle_kind "unknown" is a CANDIDATE finding: the
+    check text does not indicate how to verify it. It may be a
+    descriptive statement, a classification, or a rule disguised as a
+    check — none of which are verifiable oracles.
+
+    Limitation: the oracle_kind extraction is pattern-based. A check
+    may be verifiable through domain-specific means not captured by
+    the patterns. The finding is CANDIDATE, not CONFIRMED.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        for check in skill.get("checks", []):
+            oracle_kind = check.get("oracle_kind", "unknown")
+            if oracle_kind != "unknown":
+                continue
+            name = skill["identity"]["name"]
+            source_path = skill["identity"]["source_path"]
+            findings.append(_finding(
+                cls="CHECK_WITHOUT_ORACLE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=check["source_span"],
+                rule_id=check["id"],
+                evidence=(
+                    f"check {check['id']} has oracle_kind 'unknown'; "
+                    f"the check text does not contain a question mark, "
+                    f"a checkbox marker, or a verification verb (verify, "
+                    f"assert, run, check, confirm, test, query, inspect, "
+                    f"does, ensure, prove, validate, demonstrate)"
+                ),
+                violated_invariant=(
+                    "a check should indicate how to verify it — through "
+                    "a question, a checkbox, or a verification command"
+                ),
+                limitation=(
+                    "oracle_kind extraction is pattern-based; a check "
+                    "may be verifiable through domain-specific means "
+                    "not captured by the patterns; the finding is "
+                    "CANDIDATE, not CONFIRMED"
+                ),
+            ))
     return findings
 
 
