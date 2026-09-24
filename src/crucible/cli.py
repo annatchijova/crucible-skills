@@ -153,7 +153,7 @@ def main() -> int:
             executor = MockConfirmExecutor()
         else:
             executor = NebiusConfirmExecutor()
-        confirmation = confirm_semantic_redundancy(audit, artifact, executor)
+        confirmation = confirm_candidates(audit, artifact, executor)
         print(json.dumps(confirmation, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 

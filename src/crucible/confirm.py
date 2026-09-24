@@ -169,10 +169,16 @@ class NebiusConfirmExecutor:
 class MockConfirmExecutor:
     """Deterministic executor for testing the confirmation layer.
 
-    Returns CONFIRMED if the two skill texts share more than 80% of their
-    lines, REJECTED otherwise. This is a deterministic heuristic, not an
-    LLM. It exists so the confirmation harness can be tested without
-    NEBIUS_API_KEY.
+    For SEMANTIC_REDUNDANCY (pair-wise): returns CONFIRMED if the two
+    skill texts share more than 80% of their lines, REJECTED otherwise.
+
+    For single-skill findings (CHECK_WITHOUT_ORACLE, DESCRIPTION_BODY_GAP,
+    REQUIREMENT_WITHOUT_CHECK, SCOPE_TRIGGER_MISMATCH): returns CONFIRMED
+    if the skill text has fewer than 5 non-empty lines (short body
+    supports the finding), REJECTED otherwise.
+
+    This is a deterministic heuristic, not an LLM. It exists so the
+    confirmation harness can be tested without NEBIUS_API_KEY.
     """
 
     def __init__(self, threshold: int = 80) -> None:
@@ -184,33 +190,36 @@ class MockConfirmExecutor:
     def execute(
         self, system_prompt: str, user_prompt: str
     ) -> dict[str, Any]:
-        # The user_prompt contains the two skill texts in a structured
-        # format. Parse them to compute line overlap.
-        # Format: "SKILL_A:\n<text>\n\nSKILL_B:\n<text>\n\nQUESTION: ..."
+        # Try the pair-wise format first (SKILL_A/SKILL_B).
         skill_a_match = re.search(
             r"SKILL_A:\n(.*?)\n\nSKILL_B:", user_prompt, re.DOTALL
         )
         skill_b_match = re.search(
             r"SKILL_B:\n(.*?)\n\nQUESTION:", user_prompt, re.DOTALL
         )
-        if not skill_a_match or not skill_b_match:
-            return {
-                "output": "UNCLEAR\nCould not parse skill texts.",
-                "error": None,
-                "model": self.model,
-                "provider": "mock-deterministic",
-                "temperature": 0,
-                "max_tokens": 0,
-                "usage": {
-                    "prompt_tokens": len(system_prompt) + len(user_prompt),
-                    "completion_tokens": 20,
-                    "total_tokens": len(system_prompt) + len(user_prompt) + 20,
-                },
-                "response_id": "mock-unclear",
-                "blocked": False,
-            }
-        text_a = skill_a_match.group(1).strip()
-        text_b = skill_b_match.group(1).strip()
+        if skill_a_match and skill_b_match:
+            return self._execute_pairwise(
+                system_prompt, user_prompt,
+                skill_a_match.group(1).strip(),
+                skill_b_match.group(1).strip(),
+            )
+
+        # Try the single-skill format (SKILL/FINDING).
+        skill_match = re.search(
+            r"SKILL:\n(.*?)\n\nFINDING:", user_prompt, re.DOTALL
+        )
+        if skill_match:
+            return self._execute_single(
+                system_prompt, user_prompt, skill_match.group(1).strip()
+            )
+
+        # Unknown format.
+        return self._unclear(system_prompt, user_prompt, "Could not parse prompt format.")
+
+    def _execute_pairwise(
+        self, system_prompt: str, user_prompt: str,
+        text_a: str, text_b: str,
+    ) -> dict[str, Any]:
         lines_a = set(l.strip() for l in text_a.splitlines() if l.strip())
         lines_b = set(l.strip() for l in text_b.splitlines() if l.strip())
         if not lines_a or not lines_b:
@@ -219,7 +228,6 @@ class MockConfirmExecutor:
         else:
             overlap = len(lines_a & lines_b)
             union = len(lines_a | lines_b)
-            # Use integer percentage (no float).
             pct = (overlap * 100) // union if union > 0 else 0
             if pct >= self.threshold:
                 verdict = "CONFIRMED"
@@ -233,6 +241,39 @@ class MockConfirmExecutor:
                     f"Line overlap {pct}% < {self.threshold}%; "
                     f"the two skills cover different ground."
                 )
+        return self._response(system_prompt, user_prompt, verdict, rationale)
+
+    def _execute_single(
+        self, system_prompt: str, user_prompt: str, skill_text: str,
+    ) -> dict[str, Any]:
+        # Heuristic: if the skill body has very few non-empty lines,
+        # the finding is likely true (the body is genuinely thin).
+        # If it has many lines, the finding is likely a false positive
+        # (the body has content the extractor missed).
+        lines = [l.strip() for l in skill_text.splitlines() if l.strip()]
+        if len(lines) < 5:
+            verdict = "CONFIRMED"
+            rationale = (
+                f"Skill has only {len(lines)} non-empty lines; "
+                f"the body is genuinely thin and the finding is likely true."
+            )
+        else:
+            verdict = "REJECTED"
+            rationale = (
+                f"Skill has {len(lines)} non-empty lines; "
+                f"the body has content the extractor may have missed."
+            )
+        return self._response(system_prompt, user_prompt, verdict, rationale)
+
+    def _unclear(
+        self, system_prompt: str, user_prompt: str, reason: str,
+    ) -> dict[str, Any]:
+        return self._response(system_prompt, user_prompt, "UNCLEAR", reason)
+
+    def _response(
+        self, system_prompt: str, user_prompt: str,
+        verdict: str, rationale: str,
+    ) -> dict[str, Any]:
         output = f"{verdict}\n{rationale}"
         output_hash = hashlib.sha256(output.encode("utf-8")).hexdigest()
         return {
@@ -346,6 +387,118 @@ def _build_user_prompt(
 
 
 # ---------------------------------------------------------------------------
+# Per-class prompt builders
+# ---------------------------------------------------------------------------
+
+# Each prompt builder takes (finding, skill_text) and returns
+# (system_prompt, user_prompt). The system prompt sets the executor's
+# role; the user prompt provides the evidence and asks the question.
+
+_CONFIRMATION_SYSTEM_PROMPT = (
+    "You are a methodology audit confirmation analyst. You receive a "
+    "CANDIDATE finding from a deterministic auditor and the full text "
+    "of the skill it applies to. You must determine whether the "
+    "finding is a true defect or a false positive.\n\n"
+    "Respond with exactly one line containing one of:\n"
+    "  CONFIRMED — the finding is a true defect\n"
+    "  REJECTED — the finding is a false positive\n"
+    "  UNCLEAR — cannot determine from the provided text\n\n"
+    "On the second line, provide a one-sentence rationale.\n\n"
+    "Do not modify any values. Do not add commentary. The audit "
+    "findings are fixed and cannot be changed."
+)
+
+
+def _build_check_without_oracle_prompt(
+    finding: dict[str, Any], skill_text: str
+) -> tuple[str, str]:
+    """Prompt for CHECK_WITHOUT_ORACLE: is the check verifiable?"""
+    evidence = finding.get("evidence", "")
+    return (
+        _CONFIRMATION_SYSTEM_PROMPT,
+        (
+            f"SKILL:\n{skill_text}\n\n"
+            f"FINDING: {evidence}\n\n"
+            f"QUESTION: The deterministic auditor flagged a check as "
+            f"having no recognizable verification oracle (no question "
+            f"mark, no checkbox marker, no verification verb). Is this "
+            f"check actually unverifiable, or does it have a "
+            f"domain-specific oracle the patterns missed? "
+            f"Respond with CONFIRMED, REJECTED, or UNCLEAR and a rationale."
+        ),
+    )
+
+
+def _build_description_body_gap_prompt(
+    finding: dict[str, Any], skill_text: str
+) -> tuple[str, str]:
+    """Prompt for DESCRIPTION_BODY_GAP: does the body deliver?"""
+    evidence = finding.get("evidence", "")
+    return (
+        _CONFIRMATION_SYSTEM_PROMPT,
+        (
+            f"SKILL:\n{skill_text}\n\n"
+            f"FINDING: {evidence}\n\n"
+            f"QUESTION: The deterministic auditor found that the "
+            f"description is substantive but the body has zero "
+            f"extractable rules, checks, and procedural steps. Does "
+            f"the body actually fail to deliver what the description "
+            f"promises, or does it use non-RFC-2119 normative language "
+            f"the extractor missed? "
+            f"Respond with CONFIRMED, REJECTED, or UNCLEAR and a rationale."
+        ),
+    )
+
+
+def _build_requirement_without_check_prompt(
+    finding: dict[str, Any], skill_text: str
+) -> tuple[str, str]:
+    """Prompt for REQUIREMENT_WITHOUT_CHECK: are rules without checks?"""
+    evidence = finding.get("evidence", "")
+    return (
+        _CONFIRMATION_SYSTEM_PROMPT,
+        (
+            f"SKILL:\n{skill_text}\n\n"
+            f"FINDING: {evidence}\n\n"
+            f"QUESTION: The deterministic auditor found that the skill "
+            f"has normative rules but zero extracted checks. Are these "
+            f"rules actually without any verification checks, or does "
+            f"the skill have checks the extractor missed? "
+            f"Respond with CONFIRMED, REJECTED, or UNCLEAR and a rationale."
+        ),
+    )
+
+
+def _build_scope_trigger_mismatch_prompt(
+    finding: dict[str, Any], skill_text: str
+) -> tuple[str, str]:
+    """Prompt for SCOPE_TRIGGER_MISMATCH: does the trigger match scope?"""
+    evidence = finding.get("evidence", "")
+    return (
+        _CONFIRMATION_SYSTEM_PROMPT,
+        (
+            f"SKILL:\n{skill_text}\n\n"
+            f"FINDING: {evidence}\n\n"
+            f"QUESTION: The deterministic auditor found that the "
+            f"trigger clause and the rule content share zero "
+            f"meaningful tokens. Does the trigger actually mismatch "
+            f"the rules' scope, or do they use different vocabulary "
+            f"for the same domain? "
+            f"Respond with CONFIRMED, REJECTED, or UNCLEAR and a rationale."
+        ),
+    )
+
+
+# Registry of prompt builders by finding class.
+_PROMPT_BUILDERS: dict[str, Any] = {
+    "CHECK_WITHOUT_ORACLE": _build_check_without_oracle_prompt,
+    "DESCRIPTION_BODY_GAP": _build_description_body_gap_prompt,
+    "REQUIREMENT_WITHOUT_CHECK": _build_requirement_without_check_prompt,
+    "SCOPE_TRIGGER_MISMATCH": _build_scope_trigger_mismatch_prompt,
+}
+
+
+# ---------------------------------------------------------------------------
 # Verdict parsing
 # ---------------------------------------------------------------------------
 
@@ -423,6 +576,7 @@ def confirm_semantic_redundancy(
             is_blocked = True
             confirmations.append({
                 "finding_id": finding.get("id", ""),
+                "finding_class": "SEMANTIC_REDUNDANCY",
                 "skill_a": skill_a,
                 "skill_b": skill_b,
                 "jaccard_overlap": jaccard,
@@ -435,6 +589,7 @@ def confirm_semantic_redundancy(
         verdict, rationale = _parse_verdict(response.get("output", ""))
         confirmations.append({
             "finding_id": finding.get("id", ""),
+            "finding_class": "SEMANTIC_REDUNDANCY",
             "skill_a": skill_a,
             "skill_b": skill_b,
             "jaccard_overlap": jaccard,
@@ -447,6 +602,144 @@ def confirm_semantic_redundancy(
 
     # Build the confirmation artifact.
     # The sealed payload excludes the digest itself.
+    payload = {
+        "schema_version": CONFIRMATION_VERSION,
+        "source_audit_digest": audit.get("audit_digest", ""),
+        "source_ir_digest": ir.get("digest", ""),
+        "executor": {
+            "model": getattr(executor, "model", ""),
+            "provider": getattr(executor, "provider", "")
+            if hasattr(executor, "provider")
+            else "",
+            "temperature": getattr(executor, "temperature", 0),
+        },
+        "status": "BLOCKED" if is_blocked else "COMPLETED",
+        "confirmations": confirmations,
+        "summary": {
+            "total": len(confirmations),
+            "confirmed": sum(
+                1 for c in confirmations if c["verdict"] == "CONFIRMED"
+            ),
+            "rejected": sum(
+                1 for c in confirmations if c["verdict"] == "REJECTED"
+            ),
+            "unclear": sum(
+                1 for c in confirmations if c["verdict"] == "UNCLEAR"
+            ),
+            "blocked": sum(
+                1 for c in confirmations if c["verdict"] == "BLOCKED"
+            ),
+        },
+    }
+    digest = digest_payload(payload)
+    artifact = dict(payload)
+    artifact["confirmation_digest"] = digest
+    return artifact
+
+
+def confirm_candidates(
+    audit: dict[str, Any],
+    ir: dict[str, Any],
+    executor: ConfirmExecutor,
+    classes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Confirm or reject ALL CANDIDATE findings using an executor.
+
+    This is the general confirmation layer. It handles all CANDIDATE
+    finding types that have a registered prompt builder:
+    - SEMANTIC_REDUNDANCY (pair-wise, uses its own prompt)
+    - CHECK_WITHOUT_ORACLE
+    - DESCRIPTION_BODY_GAP
+    - REQUIREMENT_WITHOUT_CHECK
+    - SCOPE_TRIGGER_MISMATCH
+
+    If ``classes`` is given, only those finding classes are confirmed.
+    Otherwise all CANDIDATEs with a registered prompt builder are
+    confirmed.
+
+    The L2 audit artifact is NEVER modified. The confirmation is a
+    separate artifact with its own digest. The executor's verdict is an
+    OBSERVATION, not a promotion to CONFIRMED in the L2 sense.
+
+    If the executor is BLOCKED (no API key), the confirmation artifact
+    has status "BLOCKED".
+    """
+    # Determine which classes to confirm.
+    if classes is None:
+        # All classes with a prompt builder, plus SEMANTIC_REDUNDANCY.
+        target_classes = set(_PROMPT_BUILDERS.keys()) | {"SEMANTIC_REDUNDANCY"}
+    else:
+        target_classes = set(classes)
+
+    # Extract CANDIDATE findings from the audit.
+    candidate_findings = [
+        f for f in audit.get("findings", [])
+        if f.get("epistemic_status") == "CANDIDATE"
+        and f.get("class") in target_classes
+    ]
+
+    # Check if the executor is blocked.
+    is_blocked = (
+        hasattr(executor, "is_available") and not executor.is_available()
+    )
+
+    confirmations: list[dict[str, Any]] = []
+    for finding in candidate_findings:
+        cls = finding.get("class", "")
+        skill_name = finding.get("skill", "")
+        skill_text = _skill_text(ir, skill_name)
+
+        if cls == "SEMANTIC_REDUNDANCY":
+            # Use the pair-wise prompt.
+            parsed = _parse_semantic_redundancy_pair(finding)
+            if parsed is None:
+                continue
+            skill_a, skill_b, jaccard = parsed
+            text_a = _skill_text(ir, skill_a)
+            text_b = _skill_text(ir, skill_b)
+            system_prompt = _SYSTEM_PROMPT
+            user_prompt = _build_user_prompt(
+                skill_a, text_a, skill_b, text_b, jaccard
+            )
+            extra_fields: dict[str, Any] = {
+                "skill_a": skill_a,
+                "skill_b": skill_b,
+                "jaccard_overlap": jaccard,
+            }
+        elif cls in _PROMPT_BUILDERS:
+            builder = _PROMPT_BUILDERS[cls]
+            system_prompt, user_prompt = builder(finding, skill_text)
+            extra_fields = {"skill": skill_name}
+        else:
+            # No prompt builder for this class; skip.
+            continue
+
+        response = executor.execute(system_prompt, user_prompt)
+        if response.get("blocked"):
+            is_blocked = True
+            confirmations.append({
+                "finding_id": finding.get("id", ""),
+                "finding_class": cls,
+                "verdict": "BLOCKED",
+                "rationale": response.get("error", "Executor blocked"),
+                "executor_model": response.get("model", ""),
+                "executor_provider": response.get("provider", ""),
+                **extra_fields,
+            })
+            continue
+        verdict, rationale = _parse_verdict(response.get("output", ""))
+        confirmations.append({
+            "finding_id": finding.get("id", ""),
+            "finding_class": cls,
+            "verdict": verdict,
+            "rationale": rationale,
+            "executor_model": response.get("model", ""),
+            "executor_provider": response.get("provider", ""),
+            "executor_response_id": response.get("response_id", ""),
+            **extra_fields,
+        })
+
+    # Build the confirmation artifact.
     payload = {
         "schema_version": CONFIRMATION_VERSION,
         "source_audit_digest": audit.get("audit_digest", ""),

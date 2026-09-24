@@ -99,30 +99,42 @@ confirmed or rejected by an LLM executor, without the LLM entering the
 decision path.
 
 **Status:** implemented. The confirmation layer (`confirm.py`) takes
-SEMANTIC_REDUNDANCY CANDIDATEs from the L2 audit and asks an executor
-whether each pair is semantically redundant. The confirmation is a
+ALL CANDIDATE findings from the L2 audit and asks an executor whether
+each is a true defect or a false positive. The confirmation is a
 separate artifact (`crucible-confirmation/v1`) with its own SHA-256
 digest. The L2 audit artifact is NEVER modified — the confirmation is
 an OBSERVATION, not a promotion to CONFIRMED.
+
+Supported CANDIDATE types:
+- SEMANTIC_REDUNDANCY (pair-wise: are two skills redundant?)
+- CHECK_WITHOUT_ORACLE (is the check actually unverifiable?)
+- DESCRIPTION_BODY_GAP (does the body fail to deliver?)
+- REQUIREMENT_WITHOUT_CHECK (are rules actually without checks?)
+- SCOPE_TRIGGER_MISMATCH (does the trigger actually mismatch scope?)
 
 Two executors:
 - `NebiusConfirmExecutor`: calls Nebius Token Factory with
   `nvidia/nemotron-3-super-120b-a12b`. Requires `NEBIUS_API_KEY`. If
   not present, the confirmation is BLOCKED, not simulated.
-- `MockConfirmExecutor`: deterministic heuristic (line overlap >= 80%
-  → CONFIRMED). For testing without external dependencies.
+- `MockConfirmExecutor`: deterministic heuristic. For testing without
+  external dependencies.
 
-The real corpus produces 0 SEMANTIC_REDUNDANCY CANDIDATEs (the
-deterministic threshold of 2/3 is exigent), so the confirmation layer
-has 0 confirmations. Cross-process determinism confirmed.
+The real corpus produces 46 CANDIDATEs:
+- CHECK_WITHOUT_ORACLE: 16 (5 CONFIRMED, 11 REJECTED by mock)
+- DESCRIPTION_BODY_GAP: 27 (27 CONFIRMED by mock)
+- REQUIREMENT_WITHOUT_CHECK: 1 (0 CONFIRMED, 1 REJECTED by mock)
+- SCOPE_TRIGGER_MISMATCH: 2 (0 CONFIRMED, 2 REJECTED by mock)
+
+Cross-process determinism confirmed.
 
 **Must preserve:** L2 invariants (sealed audit, no LLM in decision
 path, no floats, honest BLOCKED status), plus confirmation artifact
 determinism and L2 audit immutability.
 
-**Exit evidence:** 14 falsifiable tests cover schema, LLM-out-of-
-decision-path, mock executor, Nebius BLOCKED, no candidates, summary,
-determinism, and no floats. See [L2.5 red-team review](red-team/2026-09-23-semantic-redundancy-confirmation-review.md).
+**Exit evidence:** 27 falsifiable tests cover all finding types, class
+filtering, LLM-out-of-decision-path, mock executor, Nebius BLOCKED, no
+candidates, summary, determinism, and no floats. See [L2.5 red-team
+review](red-team/2026-09-24-general-confirmation-layer-review.md).
 
 ## L3 — Composition graph
 

@@ -27,7 +27,7 @@ from .confirm import (
     CONFIRMATION_VERSION,
     MockConfirmExecutor,
     NebiusConfirmExecutor,
-    confirm_semantic_redundancy,
+    confirm_candidates,
 )
 from .graph import GRAPH_VERSION, build_composition_graph
 from .ir import digest_payload
@@ -125,7 +125,7 @@ def run_full_report(
         confirm_executor = NebiusConfirmExecutor()
         if not confirm_executor.is_available():
             confirm_executor = MockConfirmExecutor()
-        confirmation = confirm_semantic_redundancy(audit, ir, confirm_executor)
+        confirmation = confirm_candidates(audit, ir, confirm_executor)
         report["levels"]["L2.5"] = {
             "confirmation_version": confirmation["schema_version"],
             "confirmation_digest": confirmation["confirmation_digest"],
