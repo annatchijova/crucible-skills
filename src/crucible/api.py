@@ -30,12 +30,14 @@ def scan_skill_text(skill_text: str, skill_name: str = "uploaded") -> dict[str, 
     The skill is written to a temporary directory, compiled, audited, and
     the temporary directory is removed. No input is retained.
 
-    Returns the audit artifact (crucible-audit/v1) with the L1 IR and L3
-    graph embedded for convenience.
+    Returns the audit artifact (crucible-audit/v1) with the L3 graph.
+    The full L1 IR (including body_text) is NOT returned to prevent
+    information disclosure (RT-03).
     """
     _validate_skill_text(skill_text)
+    safe_name = _sanitize_skill_name(skill_name)
     with tempfile.TemporaryDirectory(prefix="crucible-scan-") as tmpdir:
-        skill_dir = Path(tmpdir) / skill_name
+        skill_dir = Path(tmpdir) / safe_name
         skill_dir.mkdir(parents=True)
         (skill_dir / "SKILL.md").write_text(skill_text, encoding="utf-8")
         ir = compile_corpus(tmpdir)
@@ -43,7 +45,7 @@ def scan_skill_text(skill_text: str, skill_name: str = "uploaded") -> dict[str, 
         graph = build_composition_graph(ir, audit)
         return {
             "audit": audit,
-            "ir": ir,
+            "ir": _redact_ir(ir),
             "graph": graph,
         }
 
@@ -52,15 +54,17 @@ def scan_directory(directory: str) -> dict[str, Any]:
     """Compile and audit a directory of skills.
 
     The directory must exist and contain at least one SKILL.md file.
-    Returns the audit artifact with the L1 IR and L3 graph.
+    Returns the audit artifact with the L3 graph. The full L1 IR
+    (including body_text) is NOT returned to prevent information
+    disclosure (RT-03).
     """
     _validate_directory(directory)
-    ir = compile_corpus(directory)
+    ir = compile_corpus(directory, max_skills=_MAX_SCAN_SKILLS)
     audit = audit_corpus(ir)
     graph = build_composition_graph(ir, audit)
     return {
         "audit": audit,
-        "ir": ir,
+        "ir": _redact_ir(ir),
         "graph": graph,
     }
 
@@ -87,6 +91,9 @@ def scan_installed_skills() -> dict[str, Any]:
             ],
         }
     # Merge all found skill directories into a single temp directory.
+    # symlinks=True preserves symlinks so the compiler's symlink check
+    # can catch symlinked SKILL.md files (RT-02 fix).
+    skipped_duplicates: list[dict[str, str]] = []
     with tempfile.TemporaryDirectory(prefix="crucible-installed-") as tmpdir:
         count = 0
         for skill_dir in skill_dirs:
@@ -98,8 +105,12 @@ def scan_installed_skills() -> dict[str, Any]:
                     continue
                 dest = Path(tmpdir) / skill_path.name
                 if dest.exists():
+                    skipped_duplicates.append({
+                        "skill_name": skill_path.name,
+                        "skipped_from": str(skill_dir),
+                    })
                     continue
-                shutil.copytree(skill_path, dest)
+                shutil.copytree(skill_path, dest, symlinks=True)
                 count += 1
         if count == 0:
             return {
@@ -109,13 +120,14 @@ def scan_installed_skills() -> dict[str, Any]:
                 "error": "no SKILL.md files found in installed skill directories",
                 "searched": [str(p) for p in skill_dirs],
             }
-        ir = compile_corpus(tmpdir)
+        ir = compile_corpus(tmpdir, max_skills=_MAX_SCAN_SKILLS)
         audit = audit_corpus(ir)
         graph = build_composition_graph(ir, audit)
         return {
             "audit": audit,
-            "ir": ir,
+            "ir": _redact_ir(ir),
             "graph": graph,
+            "skipped_duplicates": skipped_duplicates,
         }
 
 
@@ -146,6 +158,60 @@ def _validate_skill_text(skill_text: str) -> None:
         raise ValueError("skill_text must not be empty")
     if len(skill_text) > 1_000_000:
         raise ValueError("skill_text must not exceed 1MB")
+
+
+def _sanitize_skill_name(skill_name: str) -> str:
+    """Sanitize a user-supplied skill name to prevent path traversal (RT-01).
+
+    Rejects names containing path separators, .. components, or empty
+    strings. Returns the sanitized name if safe, raises ValueError
+    otherwise.
+    """
+    if not isinstance(skill_name, str):
+        raise ValueError("skill_name must be a string")
+    if not skill_name.strip():
+        raise ValueError("skill_name must not be empty")
+    if len(skill_name) > 200:
+        raise ValueError("skill_name must not exceed 200 characters")
+    # Reject path separators and traversal attempts.
+    if "/" in skill_name or "\\" in skill_name:
+        raise ValueError("skill_name must not contain path separators")
+    if skill_name in (".", ".."):
+        raise ValueError("skill_name must not be a path traversal component")
+    # Reject names that resolve to a parent path.
+    from pathlib import PurePosixPath
+    parts = PurePosixPath(skill_name).parts
+    if any(p == ".." for p in parts):
+        raise ValueError("skill_name must not contain '..' components")
+    return skill_name
+
+
+# Maximum number of skills to scan in directory/installed mode (RT-04).
+_MAX_SCAN_SKILLS = 500
+
+
+def _redact_ir(ir: dict[str, Any]) -> dict[str, Any]:
+    """Redact the L1 IR for API responses (RT-03).
+
+    Removes body_text from each skill to prevent information disclosure.
+    The audit and graph artifacts are safe to return — they contain
+    findings and structural metadata, not raw file content.
+    """
+    redacted = dict(ir)
+    redacted_skills = []
+    for skill in ir.get("skills", []):
+        redacted_skill = dict(skill)
+        redacted_skill.pop("body_text", None)
+        redacted_skills.append(redacted_skill)
+    redacted["skills"] = redacted_skills
+    # Recompute the digest over the redacted IR so consumers can verify
+    # integrity without receiving the raw content.
+    from .ir import digest_payload
+    redacted["artifact_digest"] = digest_payload({
+        "schema_version": redacted.get("schema_version"),
+        "skills": redacted_skills,
+    })
+    return redacted
 
 
 def _validate_directory(directory: str) -> None:

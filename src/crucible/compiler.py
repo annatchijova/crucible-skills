@@ -97,8 +97,13 @@ _ACTION_VERBS = {
 }
 
 
-def compile_corpus(root: Path | str) -> dict[str, Any]:
-    """Compile every ``SKILL.md`` below *root* into a canonical artifact."""
+def compile_corpus(root: Path | str, max_skills: int | None = None) -> dict[str, Any]:
+    """Compile every ``SKILL.md`` below *root* into a canonical artifact.
+
+    If *max_skills* is set and the corpus contains more SKILL.md files
+    than the limit, a ValueError is raised to prevent resource exhaustion
+    (RT-04 fix).
+    """
     corpus_root = Path(root).resolve()
     if not corpus_root.is_dir():
         raise ValueError(f"corpus root is not a directory: {root}")
@@ -106,6 +111,12 @@ def compile_corpus(root: Path | str) -> dict[str, Any]:
     paths = sorted(corpus_root.rglob("SKILL.md"), key=lambda p: p.relative_to(corpus_root).as_posix())
     if not paths:
         raise ValueError(f"corpus contains no SKILL.md files: {root}")
+
+    if max_skills is not None and len(paths) > max_skills:
+        raise ValueError(
+            f"corpus contains {len(paths)} SKILL.md files, "
+            f"exceeding the limit of {max_skills}"
+        )
 
     skills = [_compile_skill(path, corpus_root) for path in paths]
     names = [skill["identity"]["name"] for skill in skills]
