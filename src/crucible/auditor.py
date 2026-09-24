@@ -27,14 +27,6 @@ _CONFLICT_PAIRS = frozenset({
 # These are emitted in every artifact so consumers know what was NOT assessed.
 AUDIT_LIMITATIONS: list[dict[str, str]] = [
     {
-        "check_class": "DESCRIPTION_BODY_GAP",
-        "reason": (
-            "The L1 extractor is lexical and conservative; a skill with zero "
-            "extracted rules/checks may use non-RFC-2119 normative language. "
-            "Cannot distinguish extractor scope from a real description-body gap."
-        ),
-    },
-    {
         "check_class": "CHECK_WITHOUT_ORACLE",
         "reason": "The IR does not extract oracle_kind for checks.",
     },
@@ -78,6 +70,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_semantic_redundancy(skills))
     findings.extend(_check_conditional_contradiction(skills))
     findings.extend(_check_scope_trigger_mismatch(skills))
+    findings.extend(_check_description_body_gap(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -881,6 +874,78 @@ def _check_scope_trigger_mismatch(
                 "lexical token disjointness is not semantic disjointness; "
                 "the trigger and rules may use different vocabulary for "
                 "the same domain; an LLM confirmation layer is deferred"
+            ),
+        ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# DESCRIPTION_BODY_GAP
+# ---------------------------------------------------------------------------
+
+# Minimum number of meaningful tokens in the description for it to be
+# considered "substantive" (i.e., the skill promises something real).
+_DESC_MIN_TOKENS = 10
+
+
+def _check_description_body_gap(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A skill with a substantive description but zero extractable rules,
+    checks, and procedural steps.
+
+    This is the most extreme form of description-body gap: the description
+    promises something, but the body has no extractable normative
+    structure at all. The skill says what it does but the body has no
+    MUST/SHOULD rules, no checks, and no procedural steps.
+
+    The check is CANDIDATE, not CONFIRMED, because the L1 extractor is
+    lexical and conservative: a skill with zero extracted rules may use
+    non-RFC-2119 normative language (e.g., "always", "never", "ensure")
+    that the extractor does not capture. The finding documents this
+    limitation.
+
+    This is distinct from METHODOLOGICAL_VACUITY, which detects skills
+    WITH rules but WITHOUT steps or checks. DESCRIPTION_BODY_GAP detects
+    skills WITHOUT any extractable structure at all.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        desc = skill.get("metadata", {}).get("description", "")
+        desc_tokens = _tokenize(desc)
+        if len(desc_tokens) < _DESC_MIN_TOKENS:
+            continue
+        rules = skill.get("rules", [])
+        checks = skill.get("checks", [])
+        steps = skill.get("procedural_steps", [])
+        if rules or checks or steps:
+            continue
+        # No extractable structure despite a substantive description.
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        findings.append(_finding(
+            cls="DESCRIPTION_BODY_GAP",
+            epistemic_status="CANDIDATE",
+            skill=name,
+            source_path=source_path,
+            source_span=None,
+            rule_id=None,
+            evidence=(
+                f"description has {len(desc_tokens)} meaningful tokens "
+                f"but body has 0 rules, 0 checks, 0 procedural steps; "
+                f"the description promises something the body does not "
+                f"deliver in extractable normative structure"
+            ),
+            violated_invariant=(
+                "a skill's description should be backed by normative "
+                "content (rules, checks, or procedural steps) in the body"
+            ),
+            limitation=(
+                "the L1 extractor is lexical and conservative; a skill "
+                "with zero extracted rules may use non-RFC-2119 normative "
+                "language (e.g., always, never, ensure) that the "
+                "extractor does not capture; cannot distinguish "
+                "extractor scope from a real description-body gap"
             ),
         ))
     return findings
