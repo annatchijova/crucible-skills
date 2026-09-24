@@ -470,6 +470,43 @@ path (audit unmodified, separate digest, no promotion to CONFIRMED),
 blocked executor behavior, mock executor confirm/reject, and full
 pipeline. 383 tests pass.
 
+## L13 — Corpus-agnostic validation
+
+**Status: complete.**
+
+L13 proves the scanner works against skills from multiple authors and
+methodologies, not just one. A diverse corpus of 10 skills from 7
+different sources (FastAPI, Gemini CLI, Google ADK, Kimi CLI, Streamlit,
+Typer, VSCode) was collected and scanned. The scanner found 17 real
+defects without flagging skills for their writing conventions.
+
+The diverse corpus is saved as a test fixture
+(tests/fixtures/diverse-corpus/) and 10 contract tests verify:
+- The corpus has multiple skills from multiple sources.
+- The scanner produces findings on the diverse corpus.
+- All findings are from recognized check classes (no invented findings).
+- Skills with extractable content do not get DESCRIPTION_BODY_GAP (no
+  style-based false positives).
+- "Gemini CLI" (a product name) is not flagged as LLM_IN_DECISION_PATH.
+- The scanner is deterministic on the diverse corpus.
+- Style-agnostic extraction works (rules and steps extracted from
+  multiple conventions).
+- The scanner does not crash on unknown formats.
+
+L13 also found and fixed a false positive: the LLM_IN_DECISION_PATH
+check matched "Gemini CLI session... verify" because "Gemini" is both a
+product name and an LLM name. The fix adds a guard pattern that
+recognizes "Gemini CLI" / "Claude CLI" etc. as product names, not LLM
+decisions. The real corpus (88 skills) was not affected: still 100
+findings.
+
+**Must preserve:** the scanner must not flag skills for their writing
+style. It must find real engineering defects across all methodologies.
+
+**Exit evidence:** 10 falsifiable tests cover corpus diversity, finding
+validity, style-agnostic extraction, false positive fix, determinism,
+and crash safety. 393 tests pass.
+
 ## Cross-level invariants
 
 Every level must retain:

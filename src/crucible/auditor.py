@@ -1230,6 +1230,8 @@ _DETERMINISTIC_GUARD_PATTERNS = [
     re.compile(r"\b(?:fallback|guard|gate|check|assert)\b", re.IGNORECASE),
     re.compile(r"\b(?:must\s+not\s+(?:change|alter|modify|influence))\b", re.IGNORECASE),
     re.compile(r"\b(?:out\s+of\s+(?:the\s+)?decision\s+path)\b", re.IGNORECASE),
+    # "Gemini CLI" / "Claude CLI" etc. are product names, not LLM decisions.
+    re.compile(r"\b(?:LLM|model|AI|GPT|Claude|Gemini|Nemotron|Llama)\s+CLI\b", re.IGNORECASE),
 ]
 
 
