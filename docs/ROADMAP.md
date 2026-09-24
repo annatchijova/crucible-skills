@@ -423,6 +423,53 @@ the audit is run via the API, the CLI, or directly.
 boundary validation, determinism, the FastAPI app factory, endpoint
 presence, and API-vs-direct audit digest equality. 368 tests pass.
 
+## L12 — Nemotron confirmation layer for all engineering checks
+
+**Status: complete.**
+
+L12 extends the L2.5 confirmation layer from 5 finding types to 19: all
+14 engineering checks (UNBOUNDED_RETRY, LLM_IN_DECISION_PATH, OVERCLAIM,
+MISSING_FAILURE_MODE, NON_DETERMINISTIC_INSTRUCTION,
+IRREVERSIBLE_WITHOUT_REVIEW, SECRET_IN_OUTPUT, SILENT_FAILURE,
+HARDCODED_CREDENTIAL, UNBOUNDED_RESOURCE, UNVALIDATED_EXTERNAL_INPUT,
+MISSING_TIMEOUT, FLOATING_POINT_IN_DECISION_PATH, UNPINNED_DEPENDENCY)
+plus the existing 5 (SEMANTIC_REDUNDANCY, CHECK_WITHOUT_ORACLE,
+DESCRIPTION_BODY_GAP, REQUIREMENT_WITHOUT_CHECK, SCOPE_TRIGGER_MISMATCH).
+
+Each engineering check has a class-specific prompt that gives Nemotron
+the full skill text, the finding evidence, and a question asking
+whether the finding is a true defect or a false positive (e.g., "Is
+this actually an unbounded retry, or is the bound expressed in
+vocabulary the patterns missed?"). The LLM responds with
+CONFIRMED/REJECTED/UNCLEAR and a rationale.
+
+The LLM stays OUT of the decision path:
+- The L2 audit artifact is NEVER modified (verified by contract test).
+- The confirmation is a separate artifact with its own digest.
+- The confirmation is an OBSERVATION, not a promotion to CONFIRMED.
+- The audit findings remain CANDIDATE after confirmation.
+- Without NEBIUS_API_KEY, the executor is BLOCKED, not simulated.
+
+Also fixed: the confirmation artifact's `source_ir_digest` was empty
+because it used `ir.get("digest")` instead of `ir.get("artifact_digest")`.
+This was a pre-existing bug in L2.5, now fixed.
+
+On the real 88-skill corpus with the mock executor: 97 confirmations
+across 9 finding classes (CHECK_WITHOUT_ORACLE, DESCRIPTION_BODY_GAP,
+IRREVERSIBLE_WITHOUT_REVIEW, NON_DETERMINISTIC_INSTRUCTION, OVERCLAIM,
+REQUIREMENT_WITHOUT_CHECK, SCOPE_TRIGGER_MISMATCH, SECRET_IN_OUTPUT,
+UNBOUNDED_RETRY). The confirmation artifact is deterministic.
+
+**Must preserve:** the LLM never touches the decision path. The
+confirmation is an OBSERVATION beside the seal, never inside it.
+
+**Exit evidence:** 15 falsifiable tests cover prompt builder
+registration, prompt content (skill text, evidence, verdict instruction,
+do-not-modify guardrail, class-specific questions), LLM-out-of-decision-
+path (audit unmodified, separate digest, no promotion to CONFIRMED),
+blocked executor behavior, mock executor confirm/reject, and full
+pipeline. 383 tests pass.
+
 ## Cross-level invariants
 
 Every level must retain:

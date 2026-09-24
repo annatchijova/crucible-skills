@@ -540,6 +540,152 @@ _PROMPT_BUILDERS: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
+# Generic engineering-check prompt builder
+# ---------------------------------------------------------------------------
+
+# The engineering checks (UNBOUNDED_RETRY, LLM_IN_DECISION_PATH, OVERCLAIM,
+# MISSING_FAILURE_MODE, NON_DETERMINISTIC_INSTRUCTION,
+# IRREVERSIBLE_WITHOUT_REVIEW, SECRET_IN_OUTPUT, SILENT_FAILURE,
+# HARDCODED_CREDENTIAL, UNBOUNDED_RESOURCE, UNVALIDATED_EXTERNAL_INPUT,
+# MISSING_TIMEOUT, FLOATING_POINT_IN_DECISION_PATH, UNPINNED_DEPENDENCY)
+# all follow the same pattern: the deterministic auditor found a pattern
+# that indicates an engineering defect, and the LLM is asked to confirm
+# or reject based on the full skill context.
+
+# Per-class question text describing what the auditor found.
+_ENGINEERING_QUESTIONS: dict[str, str] = {
+    "UNBOUNDED_RETRY": (
+        "The deterministic auditor found a retry or repeat instruction "
+        "without a bound (max attempts, timeout, backoff, circuit breaker). "
+        "Is this actually an unbounded retry, or is the bound expressed "
+        "in vocabulary the patterns missed?"
+    ),
+    "LLM_IN_DECISION_PATH": (
+        "The deterministic auditor found an instruction to use an LLM or "
+        "model for a consequential decision without a deterministic guard. "
+        "Is the LLM actually in the decision path without a guard, or is "
+        "there a deterministic fallback the patterns missed?"
+    ),
+    "OVERCLAIM": (
+        "The deterministic auditor found an absolute claim (always, never, "
+        "guaranteed, failsafe) without qualification. Is this actually an "
+        "unqualified absolute claim, or is it qualified in a way the "
+        "patterns missed?"
+    ),
+    "MISSING_FAILURE_MODE": (
+        "The deterministic auditor found that the skill has normative "
+        "rules and procedural steps but no mention of failure, error, "
+        "exception, fallback, or recovery. Does the skill actually lack "
+        "a failure mode, or does it describe one using vocabulary the "
+        "patterns missed?"
+    ),
+    "NON_DETERMINISTIC_INSTRUCTION": (
+        "The deterministic auditor found a non-deterministic instruction "
+        "(random, arbitrary, pick any) without a deterministic anchor "
+        "(seed, fixed, pinned, reproducible). Is this actually "
+        "unanchored non-determinism, or is the anchor expressed in "
+        "vocabulary the patterns missed?"
+    ),
+    "IRREVERSIBLE_WITHOUT_REVIEW": (
+        "The deterministic auditor found an irreversible action (delete, "
+        "drop, destroy, force-push, truncate, purge) without a review "
+        "bound (review, confirm, backup, idempotent, rollback). Is this "
+        "actually an unbounded irreversible action, or is the bound "
+        "expressed in vocabulary the patterns missed?"
+    ),
+    "SECRET_IN_OUTPUT": (
+        "The deterministic auditor found an instruction to send a secret "
+        "to an output channel (log, print, echo, stdout) without "
+        "protection (redact, mask, hash, encrypt). Is this actually "
+        "leaking a secret, or is the protection expressed in vocabulary "
+        "the patterns missed?"
+    ),
+    "SILENT_FAILURE": (
+        "The deterministic auditor found an instruction to suppress an "
+        "error silently (ignore, swallow, suppress, catch and continue) "
+        "without handling (log, report, raise, abort, retry). Is this "
+        "actually a silent failure, or is the error handling expressed "
+        "in vocabulary the patterns missed?"
+    ),
+    "HARDCODED_CREDENTIAL": (
+        "The deterministic auditor found an instruction to hardcode a "
+        "credential (secret, password, token) in code without secure "
+        "storage (env var, vault, KMS). Is this actually hardcoding a "
+        "credential, or is the secure storage expressed in vocabulary "
+        "the patterns missed?"
+    ),
+    "UNBOUNDED_RESOURCE": (
+        "The deterministic auditor found an instruction to load all, "
+        "read all, or load into memory without a bound (limit, max, "
+        "batch, stream, paginate). Is this actually unbounded resource "
+        "consumption, or is the bound expressed in vocabulary the "
+        "patterns missed?"
+    ),
+    "UNVALIDATED_EXTERNAL_INPUT": (
+        "The deterministic auditor found an instruction to accept "
+        "external input (user input, request, stdin, argv) without "
+        "validation (validate, sanitize, schema, type check). Is this "
+        "actually accepting unvalidated input, or is the validation "
+        "expressed in vocabulary the patterns missed?"
+    ),
+    "MISSING_TIMEOUT": (
+        "The deterministic auditor found an instruction to wait or block "
+        "without a timeout (wait indefinitely, block forever, wait "
+        "until success) without a deadline (timeout, deadline, TTL). "
+        "Is this actually an unbounded wait, or is the timeout "
+        "expressed in vocabulary the patterns missed?"
+    ),
+    "FLOATING_POINT_IN_DECISION_PATH": (
+        "The deterministic auditor found an instruction to use "
+        "floating-point arithmetic for an exact decision (equality, "
+        "comparison, money) without exact arithmetic (Fraction, "
+        "Decimal, integer, epsilon). Is this actually using floats for "
+        "an exact decision, or is the exact arithmetic expressed in "
+        "vocabulary the patterns missed?"
+    ),
+    "UNPINNED_DEPENDENCY": (
+        "The deterministic auditor found an instruction to install a "
+        "dependency without version pinning (pip install, npm install, "
+        "install latest) without a pin (==version, @version, lock file). "
+        "Is this actually an unpinned dependency, or is the pin "
+        "expressed in vocabulary the patterns missed?"
+    ),
+}
+
+
+def _build_engineering_check_prompt(
+    finding: dict[str, Any], skill_text: str
+) -> tuple[str, str]:
+    """Generic prompt builder for engineering checks.
+
+    All engineering checks follow the same pattern: the auditor found a
+    pattern indicating a defect, and the LLM is asked to confirm or reject
+    based on the full skill context. The question text is customized per
+    check class.
+    """
+    cls = finding.get("class", "")
+    evidence = finding.get("evidence", "")
+    question = _ENGINEERING_QUESTIONS.get(cls, (
+        f"The deterministic auditor found a potential engineering defect "
+        f"of class {cls}. Is this a true defect or a false positive?"
+    ))
+    return (
+        _CONFIRMATION_SYSTEM_PROMPT,
+        (
+            f"SKILL:\n{skill_text}\n\n"
+            f"FINDING: {evidence}\n\n"
+            f"QUESTION: {question} "
+            f"Respond with CONFIRMED, REJECTED, or UNCLEAR and a rationale."
+        ),
+    )
+
+
+# Register the engineering check prompt builders.
+for _cls in _ENGINEERING_QUESTIONS:
+    _PROMPT_BUILDERS[_cls] = _build_engineering_check_prompt
+
+
+# ---------------------------------------------------------------------------
 # Verdict parsing
 # ---------------------------------------------------------------------------
 
@@ -646,7 +792,7 @@ def confirm_semantic_redundancy(
     payload = {
         "schema_version": CONFIRMATION_VERSION,
         "source_audit_digest": audit.get("audit_digest", ""),
-        "source_ir_digest": ir.get("digest", ""),
+        "source_ir_digest": ir.get("artifact_digest", ""),
         "executor": {
             "model": getattr(executor, "model", ""),
             "provider": getattr(executor, "provider", "")
@@ -801,7 +947,7 @@ def confirm_candidates(
     payload = {
         "schema_version": CONFIRMATION_VERSION,
         "source_audit_digest": audit.get("audit_digest", ""),
-        "source_ir_digest": ir.get("digest", ""),
+        "source_ir_digest": ir.get("artifact_digest", ""),
         "executor": {
             "model": getattr(executor, "model", ""),
             "provider": getattr(executor, "provider", "")
