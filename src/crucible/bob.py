@@ -144,6 +144,7 @@ class RuleBasedProposer:
                 "\n## Steps\n\n"
                 "1. Identify the requirement that applies.\n"
                 "2. Apply the requirement to the current context.\n"
+                "3. If the requirement fails, abort and report the error.\n"
             )
             if "## Composes with" in proposed:
                 proposed = proposed.replace(

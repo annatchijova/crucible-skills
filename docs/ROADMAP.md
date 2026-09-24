@@ -58,13 +58,21 @@ Initial checks:
 - scope-trigger mismatch (declared trigger shares zero tokens with rule content);
 - description-body gap (substantive description but zero extractable body structure);
 - check without oracle (check text has no extractable verification indicator);
-- claim without provenance (rule makes a numeric/standards claim without a source citation).
+- claim without provenance (rule makes a numeric/standards claim without a source citation);
+- unbounded retry (retry/repeat instruction without max attempts, timeout, backoff, or circuit breaker);
+- LLM in decision path (LLM/model used for a consequential decision without a deterministic guard);
+- overclaim (absolute claim: always, never, guaranteed, failsafe, bulletproof — without qualification);
+- missing failure mode (rules and steps but zero mention of failure, error, exception, fallback, or recovery);
+- non-deterministic instruction (random, arbitrary, pick any — without a seed, fixed, or reproducible anchor);
+- irreversible without review (delete, drop, destroy, force-push, truncate, purge — without review, backup, idempotency, or rollback).
 
-Of these, fourteen are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
+Of these, twenty are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
 COMPOSITION_CYCLE, ORPHAN_SKILL, REQUIREMENT_WITHOUT_CHECK,
 STRUCTURAL_REDUNDANCY, METHODOLOGICAL_VACUITY, NORMATIVE_CONFLICT,
 SEMANTIC_REDUNDANCY, CONDITIONAL_CONTRADICTION, SCOPE_TRIGGER_MISMATCH,
-DESCRIPTION_BODY_GAP, CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE)
+DESCRIPTION_BODY_GAP, CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE,
+UNBOUNDED_RETRY, LLM_IN_DECISION_PATH, OVERCLAIM, MISSING_FAILURE_MODE,
+NON_DETERMINISTIC_INSTRUCTION, IRREVERSIBLE_WITHOUT_REVIEW)
 and zero are abstained. All checks are now emitted. SEMANTIC_REDUNDANCY
 uses a deterministic lexical base (Jaccard with Fraction, no floats); an
 LLM confirmation layer is deferred. CONDITIONAL_CONTRADICTION uses
@@ -82,7 +90,16 @@ check text and flags checks with oracle_kind "unknown"; the real corpus
 produces 16 CANDIDATE findings (9% of checks). CLAIM_WITHOUT_PROVENANCE
 extracts claims (percentage, time, count, standard, year) from rule text
 and flags claims without provenance indicators; the real corpus produces
-0 findings.
+0 findings. The six engineering/methodology checks (UNBOUNDED_RETRY,
+LLM_IN_DECISION_PATH, OVERCLAIM, MISSING_FAILURE_MODE,
+NON_DETERMINISTIC_INSTRUCTION, IRREVERSIBLE_WITHOUT_REVIEW) scan rule
+and procedural step text for engineering anti-patterns: unbounded retry,
+LLM as sole decision authority, absolute claims without qualification,
+methods without failure modes, non-deterministic instructions without
+anchors, and irreversible actions without review bounds. On the real
+corpus (88 skills), they produce 25 CANDIDATE findings: 4 UNBOUNDED_RETRY,
+2 OVERCLAIM, 3 NON_DETERMINISTIC_INSTRUCTION, 16
+IRREVERSIBLE_WITHOUT_REVIEW, 0 LLM_IN_DECISION_PATH, 0 MISSING_FAILURE_MODE.
 
 **Must preserve:** L1 invariants (determinism, source spans, candidate status,
 identity checks, artifact determinism), plus audit determinism, no floats, no

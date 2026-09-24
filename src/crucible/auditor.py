@@ -8,6 +8,7 @@ are documented as explicit limitations rather than silently passed.
 
 from __future__ import annotations
 
+import re
 from fractions import Fraction
 from typing import Any
 
@@ -64,6 +65,12 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_description_body_gap(skills))
     findings.extend(_check_without_oracle(skills))
     findings.extend(_check_claim_without_provenance(skills))
+    findings.extend(_check_unbounded_retry(skills))
+    findings.extend(_check_llm_in_decision_path(skills))
+    findings.extend(_check_overclaim(skills))
+    findings.extend(_check_missing_failure_mode(skills))
+    findings.extend(_check_non_deterministic(skills))
+    findings.extend(_check_irreversible_without_review(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -1067,6 +1074,618 @@ def _check_claim_without_provenance(
                     "have provenance in a form not captured by the "
                     "patterns (e.g., 'as stated in the documentation'); "
                     "the finding is CANDIDATE, not CONFIRMED"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# UNBOUNDED_RETRY
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a retry/repeat instruction without an explicit bound.
+_RETRY_PATTERNS = [
+    re.compile(r"\bretry\b", re.IGNORECASE),
+    re.compile(r"\brepeat\b", re.IGNORECASE),
+    re.compile(r"\buntil\s+success\b", re.IGNORECASE),
+    re.compile(r"\bkeep\s+trying\b", re.IGNORECASE),
+    re.compile(r"\btry\s+again\b", re.IGNORECASE),
+    re.compile(r"\bloop\s+until\b", re.IGNORECASE),
+]
+
+# Patterns that indicate an explicit bound on retries.
+_RETRY_BOUND_PATTERNS = [
+    re.compile(r"\b(?:max(?:imum)?|at\s+most|limit(?:ed)?\s+to)\s+\d+", re.IGNORECASE),
+    re.compile(r"\b\d+\s*(?:times|attempts|retries|iterations)\b", re.IGNORECASE),
+    re.compile(r"\btimeout\b", re.IGNORECASE),
+    re.compile(r"\bbackoff\b", re.IGNORECASE),
+    re.compile(r"\bcircuit\s+breaker\b", re.IGNORECASE),
+    re.compile(r"\bbounded\b", re.IGNORECASE),
+    re.compile(r"\bfinite\b", re.IGNORECASE),
+    re.compile(r"\bbudget\b", re.IGNORECASE),
+    re.compile(r"\blimit\b", re.IGNORECASE),
+    re.compile(r"\bidempotent\b", re.IGNORECASE),
+]
+
+
+def _check_unbounded_retry(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or procedural step that instructs retry/repeat without a bound.
+
+    This detects the flagship composition hazard from the README: a skill that
+    says "retry until success" without specifying a maximum number of
+    attempts, a timeout, a backoff, or a circuit breaker. Unbounded retry on
+    irreversible or non-idempotent operations is a methodology defect.
+
+    The check scans rule text and procedural step text for retry indicators.
+    If any retry indicator is found and no bound indicator is present in the
+    same text, the finding is CANDIDATE.
+
+    Limitation: the check is pattern-based. A skill may describe a bounded
+    retry using vocabulary not captured by the patterns (e.g., "exponential
+    delay", "rate limit"). The finding is CANDIDATE, not CONFIRMED.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        # Check rules.
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            if not _has_unbounded_retry(text):
+                continue
+            findings.append(_finding(
+                cls="UNBOUNDED_RETRY",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} contains a retry/repeat indicator "
+                    f"without an explicit bound (max attempts, timeout, "
+                    f"backoff, or circuit breaker)"
+                ),
+                violated_invariant=(
+                    "a retry or repeat instruction must specify a bound "
+                    "(maximum attempts, timeout, backoff, or circuit breaker)"
+                ),
+                limitation=(
+                    "retry and bound detection are pattern-based; a skill "
+                    "may describe a bounded retry using vocabulary not "
+                    "captured by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+        # Check procedural steps.
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            if not _has_unbounded_retry(text):
+                continue
+            findings.append(_finding(
+                cls="UNBOUNDED_RETRY",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} contains a retry/repeat indicator "
+                    f"without an explicit bound (max attempts, timeout, "
+                    f"backoff, or circuit breaker)"
+                ),
+                violated_invariant=(
+                    "a retry or repeat instruction must specify a bound "
+                    "(maximum attempts, timeout, backoff, or circuit breaker)"
+                ),
+                limitation=(
+                    "retry and bound detection are pattern-based; a skill "
+                    "may describe a bounded retry using vocabulary not "
+                    "captured by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+def _has_unbounded_retry(text: str) -> bool:
+    """True if text contains a retry indicator but no bound indicator."""
+    has_retry = any(p.search(text) for p in _RETRY_PATTERNS)
+    if not has_retry:
+        return False
+    has_bound = any(p.search(text) for p in _RETRY_BOUND_PATTERNS)
+    return not has_bound
+
+
+# ---------------------------------------------------------------------------
+# LLM_IN_DECISION_PATH
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate an LLM/model is being used for a consequential decision.
+_LLM_DECISION_PATTERNS = [
+    re.compile(r"\b(?:LLM|model|AI|GPT|Claude|Gemini|Nemotron|Llama)\b.*\b(?:decide|judge|classify|score|verify|approve|evaluate|assess|determine|rule|adjudicate)\b", re.IGNORECASE),
+    re.compile(r"\b(?:decide|judge|classify|score|verify|approve|evaluate|assess|determine|rule|adjudicate)\b.*\b(?:LLM|model|AI|GPT|Claude|Gemini|Nemotron|Llama)\b", re.IGNORECASE),
+    re.compile(r"\bask\s+(?:the\s+)?(?:model|LLM|AI)\s+to\b", re.IGNORECASE),
+    re.compile(r"\blet\s+(?:the\s+)?(?:model|LLM|AI)\b", re.IGNORECASE),
+    re.compile(r"\buse\s+(?:the\s+)?(?:model|LLM|AI)\s+to\b", re.IGNORECASE),
+]
+
+# Patterns that indicate a deterministic fallback or guard is present.
+_DETERMINISTIC_GUARD_PATTERNS = [
+    re.compile(r"\bdeterministic\b", re.IGNORECASE),
+    re.compile(r"\b(?:sealed|sealed\s+result)\b", re.IGNORECASE),
+    re.compile(r"\b(?:verifier|verify\s+independently|independent\s+verif)\b", re.IGNORECASE),
+    re.compile(r"\b(?:fallback|guard|gate|check|assert)\b", re.IGNORECASE),
+    re.compile(r"\b(?:must\s+not\s+(?:change|alter|modify|influence))\b", re.IGNORECASE),
+    re.compile(r"\b(?:out\s+of\s+(?:the\s+)?decision\s+path)\b", re.IGNORECASE),
+]
+
+
+def _check_llm_in_decision_path(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule that instructs using an LLM/model for a consequential decision
+    without a deterministic guard.
+
+    This detects a core engineering anti-pattern: letting a language model
+    produce a verdict, score, classification, or approval without a
+    deterministic fallback or independent verification. The LLM can read
+    evidence correctly and still reach the wrong conclusion under narrative
+    pressure.
+
+    The check scans rule text for patterns that place an LLM in a
+    consequential decision role. If a deterministic guard pattern is present
+    in the same rule, the finding is suppressed.
+
+    Limitation: the check is pattern-based. A skill may describe an LLM
+    decision using vocabulary not captured by the patterns, or may have a
+    deterministic guard expressed differently. The finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_llm_decision = any(p.search(text) for p in _LLM_DECISION_PATTERNS)
+            if not has_llm_decision:
+                continue
+            has_guard = any(p.search(text) for p in _DETERMINISTIC_GUARD_PATTERNS)
+            if has_guard:
+                continue
+            findings.append(_finding(
+                cls="LLM_IN_DECISION_PATH",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs using an LLM/model for a "
+                    f"consequential decision without a deterministic guard, "
+                    f"fallback, or independent verification"
+                ),
+                violated_invariant=(
+                    "an LLM must not be the sole authority for a consequential "
+                    "decision (verdict, score, classification, approval); a "
+                    "deterministic guard or independent verifier must be present"
+                ),
+                limitation=(
+                    "LLM-decision and guard detection are pattern-based; a "
+                    "skill may describe an LLM decision or guard using "
+                    "vocabulary not captured by the patterns; the finding is "
+                    "CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# OVERCLAIM
+# ---------------------------------------------------------------------------
+
+# Absolute claims that cannot be guaranteed without qualification.
+_OVERCLAIM_PATTERNS = [
+    re.compile(r"\balways\b", re.IGNORECASE),
+    re.compile(r"\bnever\b(?!\s+fail)", re.IGNORECASE),
+    re.compile(r"\b100\s*%\b", re.IGNORECASE),
+    re.compile(r"\bguaranteed?\b", re.IGNORECASE),
+    re.compile(r"\bfailsafe\b", re.IGNORECASE),
+    re.compile(r"\bbulletproof\b", re.IGNORECASE),
+    re.compile(r"\binfallible\b", re.IGNORECASE),
+    re.compile(r"\bperfect\b", re.IGNORECASE),
+    re.compile(r"\bimpossible\s+to\s+(?:fail|break|breach)\b", re.IGNORECASE),
+]
+
+# Qualification patterns that soften an absolute claim.
+_QUALIFICATION_PATTERNS = [
+    re.compile(r"\b(?:may|might|can|could|should|typically|usually|generally|in\s+most\s+cases|under\s+normal\s+conditions)\b", re.IGNORECASE),
+    re.compile(r"\b(?:except|unless|when|if|for\s+most|best\s+effort)\b", re.IGNORECASE),
+]
+
+
+def _check_overclaim(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule that makes an absolute claim without qualification.
+
+    This detects methodology overclaiming: a rule that says "always",
+    "never", "100%", "guaranteed", "failsafe", or "bulletproof" without
+    any qualification (may, might, typically, except, unless, etc.).
+    Absolute claims in methodology are a defect because no method is
+    universally correct — there are always boundary conditions,
+    failure modes, and exceptions.
+
+    The check scans rule text for absolute claim patterns. If a
+    qualification pattern is present in the same rule, the finding is
+    suppressed.
+
+    Limitation: the check is pattern-based. A skill may make an absolute
+    claim using vocabulary not captured by the patterns, or may qualify
+    it differently. The finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_overclaim = any(p.search(text) for p in _OVERCLAIM_PATTERNS)
+            if not has_overclaim:
+                continue
+            has_qualification = any(p.search(text) for p in _QUALIFICATION_PATTERNS)
+            if has_qualification:
+                continue
+            # Identify which pattern matched for evidence.
+            matched = next(
+                p.pattern for p in _OVERCLAIM_PATTERNS if p.search(text)
+            )
+            findings.append(_finding(
+                cls="OVERCLAIM",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} makes an absolute claim "
+                    f"(matched: {matched}) without qualification "
+                    f"(may, might, typically, except, unless, etc.)"
+                ),
+                violated_invariant=(
+                    "a methodology rule must not make an absolute claim "
+                    "without qualification; every method has boundary "
+                    "conditions and failure modes"
+                ),
+                limitation=(
+                    "absolute-claim and qualification detection are "
+                    "pattern-based; a skill may make an absolute claim "
+                    "or qualify it using vocabulary not captured by the "
+                    "patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# MISSING_FAILURE_MODE
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate failure handling is mentioned.
+_FAILURE_MODE_PATTERNS = [
+    re.compile(r"\bfail(?:ed|ure)?\b", re.IGNORECASE),
+    re.compile(r"\berror\b", re.IGNORECASE),
+    re.compile(r"\bexception\b", re.IGNORECASE),
+    re.compile(r"\bfallback\b", re.IGNORECASE),
+    re.compile(r"\brecover(?:y)?\b", re.IGNORECASE),
+    re.compile(r"\brollback\b", re.IGNORECASE),
+    re.compile(r"\babort\b", re.IGNORECASE),
+    re.compile(r"\btimeout\b", re.IGNORECASE),
+    re.compile(r"\bdegrad(?:e|ation)\b", re.IGNORECASE),
+    re.compile(r"\bwhat\s+happens\s+if\b", re.IGNORECASE),
+    re.compile(r"\bif\s+(?:it|this|the)\s+(?:fails?|errors?)\b", re.IGNORECASE),
+]
+
+
+def _check_missing_failure_mode(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A skill with normative rules and procedural steps but zero mention
+    of failure, error, exception, fallback, or recovery.
+
+    This detects a methodology that says what to do but never says what
+    happens when it goes wrong. A method without a failure mode is a wish:
+    it assumes success and has no plan for deviation. This is distinct
+    from METHODOLOGICAL_VACUITY (rules but no steps) and
+    REQUIREMENT_WITHOUT_CHECK (rules but no checks).
+
+    The check fires when a skill has at least one normative rule AND at
+    least one procedural step AND none of the rule texts, step texts, or
+    body text mention any failure-mode indicator.
+
+    Limitation: the check is pattern-based. A skill may describe failure
+    handling using vocabulary not captured by the patterns. The finding
+    is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        rules = skill.get("rules", [])
+        steps = skill.get("procedural_steps", [])
+        if not rules or not steps:
+            continue
+        # Combine all text from rules, steps, and body.
+        all_texts: list[str] = [rule.get("text", "") for rule in rules]
+        all_texts.extend(step.get("text", "") for step in steps)
+        all_texts.append(skill.get("body_text", ""))
+        combined = " ".join(all_texts)
+        has_failure_mode = any(p.search(combined) for p in _FAILURE_MODE_PATTERNS)
+        if has_failure_mode:
+            continue
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        first_rule = rules[0]
+        findings.append(_finding(
+            cls="MISSING_FAILURE_MODE",
+            epistemic_status="CANDIDATE",
+            skill=name,
+            source_path=source_path,
+            source_span=first_rule["source_span"],
+            rule_id=first_rule["id"],
+            evidence=(
+                f"skill has {len(rules)} rule(s) and {len(steps)} step(s) "
+                f"but no mention of failure, error, exception, fallback, "
+                f"recovery, rollback, abort, timeout, or degradation"
+            ),
+            violated_invariant=(
+                "a methodology with normative rules and procedural steps "
+                "must specify what happens on failure; a method without a "
+                "failure mode assumes success and has no plan for deviation"
+            ),
+            limitation=(
+                "failure-mode detection is pattern-based; a skill may "
+                "describe failure handling using vocabulary not captured "
+                "by the patterns; the finding is CANDIDATE"
+            ),
+        ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# NON_DETERMINISTIC_INSTRUCTION
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a non-deterministic instruction.
+_NON_DETERMINISTIC_PATTERNS = [
+    re.compile(r"\brandom(?:ly)?\b", re.IGNORECASE),
+    re.compile(r"\barbitrary\b", re.IGNORECASE),
+    re.compile(r"\bpick\s+(?:any|one|a)\b", re.IGNORECASE),
+    re.compile(r"\bchoose\s+(?:any|one|a)\b", re.IGNORECASE),
+    re.compile(r"\bany\s+(?:order|way|approach|method)\b", re.IGNORECASE),
+]
+
+# Patterns that indicate a deterministic anchor (seed, fixed, pinned, etc.).
+_DETERMINISTIC_ANCHOR_PATTERNS = [
+    re.compile(r"\bseed\b", re.IGNORECASE),
+    re.compile(r"\bfixed\b", re.IGNORECASE),
+    re.compile(r"\bpinned\b", re.IGNORECASE),
+    re.compile(r"\bdeterministic\b", re.IGNORECASE),
+    re.compile(r"\breproducib(?:le|ility)\b", re.IGNORECASE),
+    re.compile(r"\bsame\s+(?:input|result|output)\b", re.IGNORECASE),
+]
+
+
+def _check_non_deterministic(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or procedural step that introduces non-determinism without a
+    deterministic anchor.
+
+    This detects a methodology defect: instructing the agent to use
+    "random", "arbitrary", "pick any", or "choose any" without specifying
+    a seed, a fixed procedure, or a reproducibility guarantee. Non-
+    deterministic instructions in a methodology break reproducibility: the
+    same input may produce different outputs across runs.
+
+    The check scans rule text and procedural step text for non-determinism
+    indicators. If a deterministic anchor pattern is present in the same
+    text, the finding is suppressed.
+
+    Limitation: the check is pattern-based. A skill may introduce non-
+    determinism using vocabulary not captured by the patterns, or may
+    anchor determinism differently. The finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_non_det = any(p.search(text) for p in _NON_DETERMINISTIC_PATTERNS)
+            if not has_non_det:
+                continue
+            has_anchor = any(p.search(text) for p in _DETERMINISTIC_ANCHOR_PATTERNS)
+            if has_anchor:
+                continue
+            findings.append(_finding(
+                cls="NON_DETERMINISTIC_INSTRUCTION",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} introduces non-determinism "
+                    f"(random, arbitrary, pick any) without a deterministic "
+                    f"anchor (seed, fixed, pinned, reproducible)"
+                ),
+                violated_invariant=(
+                    "a methodology instruction must not introduce non-"
+                    "determinism without a deterministic anchor; the same "
+                    "input must produce the same output"
+                ),
+                limitation=(
+                    "non-determinism and anchor detection are pattern-based; "
+                    "a skill may introduce non-determinism or anchor it "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_non_det = any(p.search(text) for p in _NON_DETERMINISTIC_PATTERNS)
+            if not has_non_det:
+                continue
+            has_anchor = any(p.search(text) for p in _DETERMINISTIC_ANCHOR_PATTERNS)
+            if has_anchor:
+                continue
+            findings.append(_finding(
+                cls="NON_DETERMINISTIC_INSTRUCTION",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} introduces non-determinism "
+                    f"(random, arbitrary, pick any) without a deterministic "
+                    f"anchor (seed, fixed, pinned, reproducible)"
+                ),
+                violated_invariant=(
+                    "a methodology instruction must not introduce non-"
+                    "determinism without a deterministic anchor; the same "
+                    "input must produce the same output"
+                ),
+                limitation=(
+                    "non-determinism and anchor detection are pattern-based; "
+                    "a skill may introduce non-determinism or anchor it "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# IRREVERSIBLE_WITHOUT_REVIEW
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate an irreversible action.
+_IRREVERSIBLE_PATTERNS = [
+    re.compile(r"\bdelete\b", re.IGNORECASE),
+    re.compile(r"\bdrop\b", re.IGNORECASE),
+    re.compile(r"\bdestroy\b", re.IGNORECASE),
+    re.compile(r"\bforce(?:[- ])?push\b", re.IGNORECASE),
+    re.compile(r"\bforce[- ]?reset\b", re.IGNORECASE),
+    re.compile(r"\btruncate\b", re.IGNORECASE),
+    re.compile(r"\bremove\b", re.IGNORECASE),
+    re.compile(r"\bpurge\b", re.IGNORECASE),
+    re.compile(r"\bwipe\b", re.IGNORECASE),
+    re.compile(r"\boverwrite\b", re.IGNORECASE),
+]
+
+# Patterns that indicate a review, confirmation, or bound on irreversible actions.
+_REVIEW_BOUND_PATTERNS = [
+    re.compile(r"\breview\b", re.IGNORECASE),
+    re.compile(r"\bconfirm(?:ation)?\b", re.IGNORECASE),
+    re.compile(r"\bapprove(?:d)?\b", re.IGNORECASE),
+    re.compile(r"\bbackup\b", re.IGNORECASE),
+    re.compile(r"\bsnapshot\b", re.IGNORECASE),
+    re.compile(r"\bbounded\b", re.IGNORECASE),
+    re.compile(r"\bidempotent\b", re.IGNORECASE),
+    re.compile(r"\breversib(?:le|ility)\b", re.IGNORECASE),
+    re.compile(r"\bundo\b", re.IGNORECASE),
+    re.compile(r"\brollback\b", re.IGNORECASE),
+    re.compile(r"\bcheckpoint\b", re.IGNORECASE),
+]
+
+
+def _check_irreversible_without_review(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or procedural step that mentions an irreversible action
+    without a review, confirmation, backup, or reversibility bound.
+
+    This detects a methodology defect: instructing the agent to delete,
+    drop, destroy, force-push, truncate, purge, or wipe without mentioning
+    review, confirmation, backup, idempotency, or rollback. Irreversible
+    actions without bounds are dangerous because they cannot be undone
+    if the instruction was wrong or the context changed.
+
+    The check scans rule text and procedural step text for irreversible
+    action indicators. If a review/bound pattern is present in the same
+    text, the finding is suppressed.
+
+    Limitation: the check is pattern-based. A skill may describe an
+    irreversible action or its bounds using vocabulary not captured by the
+    patterns. The finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_irreversible = any(p.search(text) for p in _IRREVERSIBLE_PATTERNS)
+            if not has_irreversible:
+                continue
+            has_review = any(p.search(text) for p in _REVIEW_BOUND_PATTERNS)
+            if has_review:
+                continue
+            findings.append(_finding(
+                cls="IRREVERSIBLE_WITHOUT_REVIEW",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} mentions an irreversible action "
+                    f"(delete, drop, destroy, force-push, truncate, purge, "
+                    f"wipe) without a review bound (review, confirm, backup, "
+                    f"idempotent, rollback)"
+                ),
+                violated_invariant=(
+                    "an irreversible action must be bounded by review, "
+                    "confirmation, backup, idempotency, or rollback; an "
+                    "unbounded irreversible action cannot be undone"
+                ),
+                limitation=(
+                    "irreversible-action and review-bound detection are "
+                    "pattern-based; a skill may describe an irreversible "
+                    "action or its bounds using vocabulary not captured "
+                    "by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_irreversible = any(p.search(text) for p in _IRREVERSIBLE_PATTERNS)
+            if not has_irreversible:
+                continue
+            has_review = any(p.search(text) for p in _REVIEW_BOUND_PATTERNS)
+            if has_review:
+                continue
+            findings.append(_finding(
+                cls="IRREVERSIBLE_WITHOUT_REVIEW",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} mentions an irreversible action "
+                    f"(delete, drop, destroy, force-push, truncate, purge, "
+                    f"wipe) without a review bound (review, confirm, backup, "
+                    f"idempotent, rollback)"
+                ),
+                violated_invariant=(
+                    "an irreversible action must be bounded by review, "
+                    "confirmation, backup, idempotency, or rollback; an "
+                    "unbounded irreversible action cannot be undone"
+                ),
+                limitation=(
+                    "irreversible-action and review-bound detection are "
+                    "pattern-based; a skill may describe an irreversible "
+                    "action or its bounds using vocabulary not captured "
+                    "by the patterns; the finding is CANDIDATE"
                 ),
             ))
     return findings
