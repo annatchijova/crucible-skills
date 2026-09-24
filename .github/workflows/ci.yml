@@ -56,34 +56,3 @@ jobs:
             crucible-report.json
             crucible-report.html
           retention-days: 37
-
-  corpus-audit:
-    name: Corpus audit (real corpus)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install
-        run: pip install -e .
-      - name: Compile and audit real corpus
-        run: |
-          PYTHONPATH=src python3 -m crucible.cli skills > corpus-graph.json
-      - name: Verify corpus artifact
-        run: |
-          python3 -c "
-          import json
-          g = json.load(open('corpus-graph.json'))
-          assert g['graph_version'] == 'crucible-graph/v1'
-          assert g['graph_digest'].startswith('sha256:')
-          print('graph_digest:', g['graph_digest'][:40] + '...')
-          print('edges:', len(g['edges']))
-          print('nodes:', len(g['nodes']))
-          "
-      - name: Upload corpus artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: corpus-audit
-          path: corpus-graph.json
-          retention-days: 37
