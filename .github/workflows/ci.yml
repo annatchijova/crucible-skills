@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: Test suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run tests
+        run: PYTHONPATH=src python3 -m pytest -q
+
+  report:
+    name: Full pipeline report
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run full L1-L7 report
+        run: |
+          PYTHONPATH=src python3 -m crucible.cli --report --local-executor > crucible-report.json
+      - name: Verify report is sealed
+        run: |
+          python3 -c "
+          import json
+          r = json.load(open('crucible-report.json'))
+          assert r['report_version'] == 'crucible-report/v1'
+          assert r['report_digest'].startswith('sha256:')
+          assert r['nebius_blocked'] is True
+          print('report_digest:', r['report_digest'][:40] + '...')
+          print('nebius_blocked:', r['nebius_blocked'])
+          print('levels:', sorted(r['levels'].keys()))
+          "
+      - name: Render HTML viewer
+        run: |
+          PYTHONPATH=src python3 -m crucible.cli --view crucible-report.json > crucible-report.html
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: crucible-report
+          path: |
+            crucible-report.json
+            crucible-report.html
+          retention-days: 37
+
+  corpus-audit:
+    name: Corpus audit (real corpus)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Compile and audit real corpus
+        run: |
+          PYTHONPATH=src python3 -m crucible.cli skills > corpus-graph.json
+      - name: Verify corpus artifact
+        run: |
+          python3 -c "
+          import json
+          g = json.load(open('corpus-graph.json'))
+          assert g['graph_version'] == 'crucible-graph/v1'
+          assert g['graph_digest'].startswith('sha256:')
+          print('graph_digest:', g['graph_digest'][:40] + '...')
+          print('edges:', len(g['edges']))
+          print('nodes:', len(g['nodes']))
+          "
+      - name: Upload corpus artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-audit
+          path: corpus-graph.json
+          retention-days: 37

@@ -101,13 +101,18 @@ This repository has the first six coherent implementation levels:
 - **L5 — Behavioral differential:** runs the same task against 4 skill variants (no-skill, original, mutant, repair), observes 4 explicit properties with a deterministic oracle, and seals the report. The local executor shows the expected differential (mutant fails P3: unbounded retry). The Nebius/Nemotron executor is real code using the Token Factory API; execution is BLOCKED until an API key is available. The model is the subject of observation, not the judge.
 - **L6 — Bob workflow:** Bob receives audit findings, proposes a repair (rule-based or LLM via Nebius), and Crucible deterministically re-audits and accepts or rejects. Acceptance criteria: the targeted finding is gone AND no new findings AND the corpus compiles. Bob proposes; Crucible decides.
 - **L7 — Closed repair loop:** integrates L6 and L5 into a single closed workflow. Bob proposes a repair; Crucible re-audits deterministically (L6); if the deterministic gate passes, the loop runs a behavioral replay (L5 property oracle) comparing the repaired skill against the original. A repair that passes deterministic but fails behavioral is REJECTED with `BEHAVIORAL_REGRESSION`. Bob proposes; the property oracle observes; Crucible decides.
+- **L8 — CI and presentation:** a composite report generator runs the full L1-L7 pipeline and seals a `crucible-report/v1` artifact with all level digests. A read-only HTML viewer renders any sealed artifact JSON as a self-contained page (no computation, no `<script>` tags). A GitHub Actions CI workflow runs tests, generates the report, renders HTML, and uploads both as artifacts. No consumer has independent decision logic.
 
-L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. L6 accepts a rule-based repair for the REQUIREMENT_WITHOUT_CHECK finding; the LLM proposer is BLOCKED (no API key). L7 accepts a rule-based repair that passes both deterministic re-audit and behavioral replay; the LLM proposer and Nebius executor are BLOCKED (no API key). The CI and presentation surfaces remain explicitly in progress.
+L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. L6 accepts a rule-based repair for the REQUIREMENT_WITHOUT_CHECK finding; the LLM proposer is BLOCKED (no API key). L7 accepts a rule-based repair that passes both deterministic re-audit and behavioral replay; the LLM proposer and Nebius executor are BLOCKED (no API key). L8 produces a sealed composite report, a read-only HTML viewer, and a CI workflow. All levels are closed.
 
-### Run L1-L7 locally
+### Run L1-L8 locally
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+# Run the full L1-L7 composite report (L8, no API key needed):
+PYTHONPATH=src python3 -m crucible.cli --report --local-executor > crucible-report.json
+# Render the report as a self-contained HTML page (L8):
+PYTHONPATH=src python3 -m crucible.cli --view crucible-report.json > crucible-report.html
 # Run the closed repair loop with rule-based proposer (L7, no API key needed):
 PYTHONPATH=src python3 -m crucible.cli --repair-loop --local-executor > repair-loop-report.json
 # Run the closed repair loop with LLM proposer (L7, needs NEBIUS_API_KEY):
@@ -158,7 +163,9 @@ crucible-skills/
 │   ├── behavioral.py      # L5: behavioral differential harness
 │   ├── bob.py             # L6: Bob engineering workflow
 │   ├── repair_loop.py     # L7: closed repair loop
-│   └── cli.py             # compile + audit + graph + mutate + behave + bob + repair-loop CLI
+│   ├── report.py          # L8: composite report generator (L1-L7)
+│   ├── viewer.py          # L8: read-only HTML artifact viewer
+│   └── cli.py             # compile + audit + graph + mutate + behave + bob + repair-loop + report + view CLI
 └── tests/
     ├── test_compiler_contract.py  # L1 falsifiable contract tests
     ├── test_auditor_contract.py   # L2 falsifiable contract tests
@@ -167,6 +174,7 @@ crucible-skills/
     ├── test_behavioral_contract.py # L5 falsifiable contract tests
     ├── test_bob_contract.py       # L6 falsifiable contract tests
     ├── test_repair_loop_contract.py # L7 falsifiable contract tests
+    ├── test_report_viewer_contract.py # L8 falsifiable contract tests
     └── test_end_to_end.py         # L1-L7 integration tests
 ```
 

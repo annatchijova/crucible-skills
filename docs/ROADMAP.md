@@ -245,7 +245,29 @@ Nebius blocked status. Cross-process digest verified identical. See
 
 **Outcome:** the same audit artifact powers CLI, CI, TUI, and a read-only graph viewer.
 
-**Exit evidence:** no consumer has independent decision logic; corpus diffs and historical artifacts remain reproducible.
+**Status:** implemented with a composite report generator, a read-only
+HTML viewer, and a GitHub Actions CI workflow. The report generator runs
+the full L1-L7 pipeline and seals a composite artifact
+(`crucible-report/v1`) with all level digests and chain of custody. The
+viewer reads any sealed artifact JSON and renders it as a self-contained
+HTML page (inline CSS, no external dependencies, no `<script>` tags, no
+computation). The CI workflow runs the test suite, generates the full
+report, renders the HTML, and uploads both as artifacts.
+
+The core invariant: **no consumer has independent decision logic.** The
+report delegates to each level's runner; the viewer renders what it
+reads; the CI runs the CLI. None of them re-implement any level's logic.
+
+**Must preserve:** L1-L7 invariants, plus report determinism (same
+corpus + same executor = same digest), no floats, no LLM in any
+consumer, honest BLOCKED status, and no consumer re-computes digests or
+outcomes.
+
+**Exit evidence:** 19 falsifiable tests cover report sealing, level
+delegation, determinism (same-process and cross-process), Nebius blocked
+status, viewer HTML output, viewer no-computation invariant, and viewer
+works with any artifact type. Cross-process digest verified identical.
+See [L8 red-team review](red-team/2026-09-23-l8-ci-viewer-review.md).
 
 ## Cross-level invariants
 
