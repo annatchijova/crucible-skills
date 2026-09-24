@@ -46,14 +46,6 @@ AUDIT_LIMITATIONS: list[dict[str, str]] = [
         "check_class": "SCOPE_TRIGGER_MISMATCH",
         "reason": "The IR does not extract declared triggers or scope inclusions/exclusions.",
     },
-    {
-        "check_class": "CONDITIONAL_CONTRADICTION",
-        "reason": (
-            "The IR extracts rule subjects but not conditions or exceptions; "
-            "cannot determine whether two rules with the same subject can both "
-            "be active simultaneously."
-        ),
-    },
 ]
 
 
@@ -88,6 +80,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_methodological_vacuity(skills))
     findings.extend(_check_normative_conflict(skills))
     findings.extend(_check_semantic_redundancy(skills))
+    findings.extend(_check_conditional_contradiction(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -590,6 +583,228 @@ def _check_semantic_redundancy(
                     "deferred and would confirm or reject each candidate"
                 ),
             ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# CONDITIONAL_CONTRADICTION
+# ---------------------------------------------------------------------------
+
+# Modalities and their polarity: positive = "do X", negative = "don't do X".
+_POSITIVE_MODALITIES = frozenset({"MUST", "SHOULD"})
+_NEGATIVE_MODALITIES = frozenset({"MUST_NOT", "SHOULD_NOT"})
+
+
+def _rule_polarity(modality: str) -> str:
+    """Return the base polarity of a rule: 'positive' or 'negative'."""
+    if modality in _POSITIVE_MODALITIES:
+        return "positive"
+    if modality in _NEGATIVE_MODALITIES:
+        return "negative"
+    return "neutral"
+
+
+def _conditions_overlap(cond_a: str, cond_b: str) -> bool:
+    """Check if two condition texts overlap.
+
+    Two conditions overlap if one is a substring of the other (after
+    normalization). This is conservative: "read-only operations" and
+    "read-only" overlap; "read-only" and "write-only" do not.
+    """
+    if cond_a == cond_b:
+        return True
+    # Substring check in both directions.
+    if cond_a in cond_b or cond_b in cond_a:
+        return True
+    # Token overlap: if they share all tokens of the shorter one.
+    tokens_a = set(cond_a.split())
+    tokens_b = set(cond_b.split())
+    if not tokens_a or not tokens_b:
+        return False
+    shorter = tokens_a if len(tokens_a) <= len(tokens_b) else tokens_b
+    longer = tokens_b if shorter is tokens_a else tokens_a
+    return shorter.issubset(longer)
+
+
+def _effective_polarity(rule: dict[str, Any], condition_text: str) -> str | None:
+    """Compute the effective polarity of a rule under a specific condition.
+
+    Returns 'positive', 'negative', or None if the rule does not apply
+    under the given condition.
+
+    - If the rule has no conditions, it applies unconditionally with its
+      base polarity.
+    - If the rule has a scope condition matching the given condition, it
+      applies with its base polarity.
+    - If the rule has an exception condition matching the given
+      condition, it applies with inverted polarity (the exception makes
+      the rule NOT apply, which means the opposite guidance holds).
+    - If the rule has conditions but none match, it does not apply
+      under the given condition (returns None).
+    """
+    base = _rule_polarity(rule["modality"])
+    conditions = rule.get("conditions", [])
+    if not conditions:
+        return base
+
+    # Check if any condition matches.
+    for cond in conditions:
+        if not _conditions_overlap(cond["text"], condition_text):
+            continue
+        if cond["type"] == "exception":
+            # Exception inverts the polarity for this condition.
+            return "negative" if base == "positive" else "positive"
+        if cond["type"] == "scope":
+            # Scope restricts the rule to this condition.
+            return base
+    # The rule has conditions but none match — it does not apply.
+    return None
+
+
+def _check_conditional_contradiction(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Two rules with the same subject, overlapping conditions, but
+    opposite effective polarity under those conditions.
+
+    This is the subtle sibling of NORMATIVE_CONFLICT. NORMATIVE_CONFLICT
+    catches unconditional contradictions (MUST vs MUST_NOT on the same
+    subject). CONDITIONAL_CONTRADICTION catches conditional ones: two
+    rules that seem compatible in general but conflict under a specific
+    condition.
+
+    Example:
+      Rule A: "Retries MUST be bounded, except for read-only operations"
+        -> under "read-only operations": negative (not bounded)
+      Rule B: "Retries MUST be bounded for read-only operations"
+        -> under "read-only operations": positive (bounded)
+      -> CONDITIONAL_CONTRADICTION on "read-only operations"
+    """
+    # Collect all rules with subjects and conditions across all skills.
+    all_rules: list[tuple[str, dict[str, Any], str]] = []
+    for skill in skills:
+        skill_name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill["rules"]:
+            subject = rule.get("subject", "")
+            if not subject:
+                continue
+            all_rules.append((skill_name, rule, source_path))
+
+    findings: list[dict[str, Any]] = []
+    for i in range(len(all_rules)):
+        for j in range(i + 1, len(all_rules)):
+            skill_i, rule_i, path_i = all_rules[i]
+            skill_j, rule_j, path_j = all_rules[j]
+            # Must be same subject.
+            if rule_i["subject"] != rule_j["subject"]:
+                continue
+            # Skip if NORMATIVE_CONFLICT already catches this
+            # (unconditional opposite modality).
+            pair = (rule_i["modality"], rule_j["modality"])
+            if pair in _CONFLICT_PAIRS:
+                continue
+            # Both rules must have at least one condition.
+            conds_i = rule_i.get("conditions", [])
+            conds_j = rule_j.get("conditions", [])
+            if not conds_i and not conds_j:
+                continue
+            # Collect all condition texts from both rules.
+            all_cond_texts: set[str] = set()
+            for c in conds_i:
+                all_cond_texts.add(c["text"])
+            for c in conds_j:
+                all_cond_texts.add(c["text"])
+            # Also include conditions from one rule when the other has
+            # no conditions (the unconditional rule applies everywhere).
+            if not conds_i or not conds_j:
+                # One rule is unconditional. Check if the conditional
+                # rule's polarity under its own condition conflicts with
+                # the unconditional rule's base polarity.
+                if not conds_i:
+                    # Rule i is unconditional, rule j is conditional.
+                    base_i = _rule_polarity(rule_i["modality"])
+                    for cond_text in all_cond_texts:
+                        eff_j = _effective_polarity(rule_j, cond_text)
+                        if eff_j is not None and eff_j != base_i:
+                            # Report on the lexicographically smaller skill.
+                            if skill_i <= skill_j:
+                                r_name, r_path, r_rule = skill_i, path_i, rule_i
+                                other = skill_j
+                            else:
+                                r_name, r_path, r_rule = skill_j, path_j, rule_j
+                                other = skill_i
+                            findings.append(_finding(
+                                cls="CONDITIONAL_CONTRADICTION",
+                                epistemic_status="CONFIRMED",
+                                skill=r_name,
+                                source_path=r_path,
+                                source_span=r_rule["source_span"],
+                                rule_id=r_rule["id"],
+                                evidence=(
+                                    f"subject {rule_i['subject']!r} conflicts "
+                                    f"under condition {cond_text!r}: "
+                                    f"{rule_i['modality']} in {skill_i} vs "
+                                    f"{rule_j['modality']} in {skill_j} "
+                                    f"(rule {rule_j['id']})"
+                                ),
+                                violated_invariant=(
+                                    "two rules governing the same subject "
+                                    "must not prescribe opposite guidance "
+                                    "under the same condition"
+                                ),
+                                limitation=(
+                                    "condition extraction is pattern-based "
+                                    "(except for, when, unless, if, for, "
+                                    "during, while); semantic condition "
+                                    "matching is not supported"
+                                ),
+                            ))
+                            break  # one conflict per pair is enough
+                    continue
+            # Both rules have conditions. Check each condition for
+            # conflicting polarity.
+            for cond_text in sorted(all_cond_texts):
+                eff_i = _effective_polarity(rule_i, cond_text)
+                eff_j = _effective_polarity(rule_j, cond_text)
+                if eff_i is None or eff_j is None:
+                    continue
+                if eff_i == eff_j:
+                    continue
+                # Conflict found under this condition.
+                if skill_i <= skill_j:
+                    r_name, r_path, r_rule = skill_i, path_i, rule_i
+                    other = skill_j
+                else:
+                    r_name, r_path, r_rule = skill_j, path_j, rule_j
+                    other = skill_i
+                findings.append(_finding(
+                    cls="CONDITIONAL_CONTRADICTION",
+                    epistemic_status="CONFIRMED",
+                    skill=r_name,
+                    source_path=r_path,
+                    source_span=r_rule["source_span"],
+                    rule_id=r_rule["id"],
+                    evidence=(
+                        f"subject {rule_i['subject']!r} conflicts "
+                        f"under condition {cond_text!r}: "
+                        f"{rule_i['modality']} in {skill_i} vs "
+                        f"{rule_j['modality']} in {skill_j} "
+                        f"(rule {rule_j['id']})"
+                    ),
+                    violated_invariant=(
+                        "two rules governing the same subject "
+                        "must not prescribe opposite guidance "
+                        "under the same condition"
+                    ),
+                    limitation=(
+                        "condition extraction is pattern-based "
+                        "(except for, when, unless, if, for, "
+                        "during, while); semantic condition "
+                        "matching is not supported"
+                    ),
+                ))
+                break  # one conflict per pair is enough
     return findings
 
 

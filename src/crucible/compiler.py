@@ -154,15 +154,66 @@ def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
             modality = raw_modality.replace(" ", "_").upper()
             text = lines[index].strip()
             subject = _extract_subject(text, raw_modality)
+            conditions = _extract_conditions(text)
             rules.append({
                 "id": f"rule-{len(rules) + 1:04d}",
                 "extraction_status": "candidate",
                 "modality": modality,
                 "subject": subject,
+                "conditions": conditions,
                 "text": text,
                 "source_span": {"line": index + 1, "column": match.start(1) + 1},
             })
     return rules
+
+
+# Condition extraction patterns. Each pattern captures a condition
+# clause from rule text. The type determines how the condition affects
+# the rule's polarity:
+#   "exception" — inverts the modality for this condition (except for, unless)
+#   "scope" — restricts the modality to this condition (when, if, for, during, while)
+_CONDITION_PATTERNS = [
+    # Exception patterns (invert polarity).
+    (re.compile(r"\bexcept\s+(?:for\s+)?(.+?)(?:[.;,]|$)", re.IGNORECASE), "exception"),
+    (re.compile(r"\bunless\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "exception"),
+    # Scope patterns (restrict polarity).
+    (re.compile(r"\bwhen\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "scope"),
+    (re.compile(r"\bif\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "scope"),
+    (re.compile(r"\bduring\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "scope"),
+    (re.compile(r"\bwhile\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "scope"),
+    # "for X" is ambiguous (could be a recipient), but in normative rules
+    # it often introduces a scope condition. We extract it as scope.
+    (re.compile(r"\bfor\s+(.+?)(?:[.;,]|$)", re.IGNORECASE), "scope"),
+]
+
+
+def _extract_conditions(rule_text: str) -> list[dict[str, str]]:
+    """Extract condition clauses from a normative rule.
+
+    Returns a list of {text, type} where type is "exception" (inverts
+    the modality) or "scope" (restricts the modality). The text is
+    normalized to lowercase and stripped.
+    """
+    conditions: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for pattern, cond_type in _CONDITION_PATTERNS:
+        for match in pattern.finditer(rule_text):
+            raw = match.group(1).strip().lower()
+            # Strip articles and trailing punctuation.
+            for article in ("the ", "a ", "an "):
+                if raw.startswith(article):
+                    raw = raw[len(article):]
+            raw = raw.strip(" ,;:.")
+            if len(raw) < 2:
+                continue
+            key = (raw, cond_type)
+            if key in seen:
+                continue
+            seen.add(key)
+            conditions.append({"text": raw, "type": cond_type})
+    # Sort for determinism.
+    conditions.sort(key=lambda c: (c["text"], c["type"]))
+    return conditions
 
 
 def _extract_subject(rule_text: str, raw_modality: str) -> str:
