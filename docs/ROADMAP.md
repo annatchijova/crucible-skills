@@ -50,14 +50,17 @@ Initial checks:
 - claims without required provenance;
 - description/body mismatch;
 - scope and trigger inconsistencies;
-- structural redundancy.
+- structural redundancy;
+- methodological vacuity (rules but no steps and no checks);
+- normative conflict (same subject, opposite modality).
 
-Of these, six are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
+Of these, eight are emitted (BROKEN_REFERENCE, SELF_COMPOSITION,
 COMPOSITION_CYCLE, ORPHAN_SKILL, REQUIREMENT_WITHOUT_CHECK,
-STRUCTURAL_REDUNDANCY) and five are abstained with documented reasons
-(DESCRIPTION_BODY_GAP, CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE,
-SCOPE_TRIGGER_MISMATCH, NORMATIVE_CONFLICT). Abstention is honest: the current
-IR does not extract the fields these checks require.
+STRUCTURAL_REDUNDANCY, METHODOLOGICAL_VACUITY, NORMATIVE_CONFLICT) and
+five are abstained with documented reasons (DESCRIPTION_BODY_GAP,
+CHECK_WITHOUT_ORACLE, CLAIM_WITHOUT_PROVENANCE, SCOPE_TRIGGER_MISMATCH,
+CONDITIONAL_CONTRADICTION). Abstention is honest: the current IR does
+not extract the fields these checks require.
 
 **Must preserve:** L1 invariants (determinism, source spans, candidate status,
 identity checks, artifact determinism), plus audit determinism, no floats, no

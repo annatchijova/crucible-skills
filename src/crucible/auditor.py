@@ -14,6 +14,14 @@ from .ir import SCHEMA_VERSION, digest_payload
 
 AUDIT_VERSION = "crucible-audit/v1"
 
+# Modality pairs that constitute a direct contradiction for the same subject.
+_CONFLICT_PAIRS = frozenset({
+    ("MUST", "MUST_NOT"),
+    ("MUST_NOT", "MUST"),
+    ("SHOULD", "SHOULD_NOT"),
+    ("SHOULD_NOT", "SHOULD"),
+})
+
 # Checks the current IR cannot support, with the reason each is abstained.
 # These are emitted in every artifact so consumers know what was NOT assessed.
 AUDIT_LIMITATIONS: list[dict[str, str]] = [
@@ -38,8 +46,12 @@ AUDIT_LIMITATIONS: list[dict[str, str]] = [
         "reason": "The IR does not extract declared triggers or scope inclusions/exclusions.",
     },
     {
-        "check_class": "NORMATIVE_CONFLICT",
-        "reason": "The IR does not extract conditions or exceptions for normative rules.",
+        "check_class": "CONDITIONAL_CONTRADICTION",
+        "reason": (
+            "The IR extracts rule subjects but not conditions or exceptions; "
+            "cannot determine whether two rules with the same subject can both "
+            "be active simultaneously."
+        ),
     },
 ]
 
@@ -72,6 +84,8 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_orphan_skills(skills, name_set))
     findings.extend(_check_requirement_without_check(skills))
     findings.extend(_check_structural_redundancy(skills))
+    findings.extend(_check_methodological_vacuity(skills))
+    findings.extend(_check_normative_conflict(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -325,6 +339,117 @@ def _check_structural_redundancy(
                 "may govern different scopes or compose rather than duplicate"
             ),
         ))
+    return findings
+
+
+def _check_methodological_vacuity(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A skill with normative rules but zero procedural steps and zero checks.
+
+    This detects skills that say what to do (MUST/SHOULD) but never say how
+    (no steps, no procedure, no verification). The skill is methodologically
+    vacuous: it is a wish, not a method.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        rules = skill["rules"]
+        if not rules:
+            continue
+        normative = [
+            r for r in rules
+            if r["modality"] in ("MUST", "SHOULD", "MUST_NOT", "SHOULD_NOT")
+        ]
+        if not normative:
+            continue
+        steps = skill.get("procedural_steps", [])
+        checks = skill["checks"]
+        if steps or checks:
+            continue
+        first_rule = normative[0]
+        findings.append(_finding(
+            cls="METHODOLOGICAL_VACUITY",
+            epistemic_status="CANDIDATE",
+            skill=skill["identity"]["name"],
+            source_path=skill["identity"]["source_path"],
+            source_span=first_rule["source_span"],
+            rule_id=first_rule["id"],
+            evidence=(
+                f"skill has {len(normative)} normative rule(s) but "
+                f"0 procedural steps and 0 checks"
+            ),
+            violated_invariant=(
+                "a methodology skill should specify how to verify or "
+                "execute its normative rules, not just what to require"
+            ),
+            limitation=(
+                "procedural step extraction is section-heading and "
+                "numbered-list based; a skill with embedded procedural "
+                "prose (no ## Steps section, no numbered list) will be "
+                "a false positive"
+            ),
+        ))
+    return findings
+
+
+def _check_normative_conflict(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Two rules with the same subject but contradictory modalities.
+
+    A conflict is: same normalized subject, one rule says MUST and another
+    says MUST_NOT (or SHOULD vs SHOULD_NOT). This detects both within-skill
+    and cross-skill contradictions.
+    """
+    # Group rules by subject: subject -> list of (skill_name, rule, source_path)
+    by_subject: dict[str, list[tuple[str, dict[str, Any], str]]] = {}
+    for skill in skills:
+        skill_name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill["rules"]:
+            subject = rule.get("subject", "")
+            if not subject:
+                continue
+            by_subject.setdefault(subject, []).append(
+                (skill_name, rule, source_path)
+            )
+
+    findings: list[dict[str, Any]] = []
+    for subject in sorted(by_subject):
+        entries = by_subject[subject]
+        # Check all pairs for conflicting modalities.
+        for i in range(len(entries)):
+            for j in range(i + 1, len(entries)):
+                skill_i, rule_i, path_i = entries[i]
+                skill_j, rule_j, path_j = entries[j]
+                pair = (rule_i["modality"], rule_j["modality"])
+                if pair not in _CONFLICT_PAIRS:
+                    continue
+                # Report on the first rule of the pair (deterministic order).
+                findings.append(_finding(
+                    cls="NORMATIVE_CONFLICT",
+                    epistemic_status="CONFIRMED",
+                    skill=skill_i,
+                    source_path=path_i,
+                    source_span=rule_i["source_span"],
+                    rule_id=rule_i["id"],
+                    evidence=(
+                        f"subject {subject!r} has conflicting modalities: "
+                        f"{rule_i['modality']} in {skill_i} vs "
+                        f"{rule_j['modality']} in {skill_j} "
+                        f"(rule {rule_j['id']})"
+                    ),
+                    violated_invariant=(
+                        "two rules governing the same subject must not "
+                        "prescribe contradictory modalities"
+                    ),
+                    limitation=(
+                        "subject extraction is lexical (noun phrase before "
+                        "the modal verb); two rules with different surface "
+                        "forms but the same semantic subject will not be "
+                        "detected as conflicting"
+                    ),
+                ))
     return findings
 
 

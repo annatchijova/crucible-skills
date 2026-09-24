@@ -8,11 +8,15 @@ from typing import Any
 
 from .ir import SCHEMA_VERSION, digest_bytes, digest_payload
 
-_MODALITY = re.compile(r"\b(MUST_NOT|SHOULD_NOT|MUST|SHOULD|MAY)\b")
+# Match "MUST NOT" / "SHOULD NOT" (with space) before bare MUST/SHOULD/MAY
+# so that negated modalities are captured correctly.
+_MODALITY = re.compile(r"\b(MUST\s+NOT|SHOULD\s+NOT|MUST|SHOULD|MAY)\b")
 _FRONTMATTER_LINE = re.compile(r"^(?P<key>[A-Za-z0-9_-]+):\s*(?P<value>.*)$")
 _URL = re.compile(r"https?://[^\s)>]+")
 _HEADING = re.compile(r"^(#{1,6})\s+(?P<title>.+?)\s*$")
 _BULLET = re.compile(r"^\s*[-*+]\s+(?P<value>.+?)\s*$")
+_NUMBERED = re.compile(r"^\s*(?P<num>\d+)\.\s+(?P<value>.+?)\s*$")
+_PROCEDURAL_SECTIONS = {"steps", "procedure", "how to", "how", "process", "workflow", "method"}
 
 
 def compile_corpus(root: Path | str) -> dict[str, Any]:
@@ -63,6 +67,7 @@ def _compile_skill(path: Path, root: Path) -> dict[str, Any]:
         "metadata": {key: frontmatter[key] for key in sorted(frontmatter)},
         "rules": _extract_rules(lines, body_start),
         "checks": _extract_checks(lines, sections),
+        "procedural_steps": _extract_procedural_steps(lines, sections, body_start),
         "relations": {
             "composes_with": _extract_relations(lines, sections, "composes with"),
             "delegates_to": _extract_relations(lines, sections, "delegates to"),
@@ -144,14 +149,103 @@ def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
     for index in range(body_start, len(lines)):
         match = _MODALITY.search(lines[index])
         if match:
+            raw_modality = match.group(1)
+            # Normalize "MUST NOT" -> "MUST_NOT", "SHOULD NOT" -> "SHOULD_NOT"
+            modality = raw_modality.replace(" ", "_").upper()
+            text = lines[index].strip()
+            subject = _extract_subject(text, raw_modality)
             rules.append({
                 "id": f"rule-{len(rules) + 1:04d}",
                 "extraction_status": "candidate",
-                "modality": match.group(1),
-                "text": lines[index].strip(),
+                "modality": modality,
+                "subject": subject,
+                "text": text,
                 "source_span": {"line": index + 1, "column": match.start(1) + 1},
             })
     return rules
+
+
+def _extract_subject(rule_text: str, raw_modality: str) -> str:
+    """Extract the subject of a normative rule.
+
+    The subject is the noun phrase before the modal verb, normalized
+    to lowercase with leading articles and markdown formatting stripped.
+    If the modal verb is at the start of the line (after stripping
+    markdown), there is no explicit subject and we return "".
+    """
+    idx = rule_text.find(raw_modality)
+    if idx <= 0:
+        return ""
+    subject = rule_text[:idx].strip()
+    # Strip markdown formatting: bold (**), italic (*), code (`), underline (_)
+    subject = re.sub(r"\*+|`+|_+", " ", subject)
+    # Strip leading list markers, table pipes, heading markers
+    subject = re.sub(r"^[\s|\-*+#>]+", "", subject)
+    # Normalize: lowercase, strip leading articles, strip trailing punctuation
+    subject = subject.lower()
+    for article in ("the ", "a ", "an ", "you ", "your "):
+        if subject.startswith(article):
+            subject = subject[len(article):]
+    subject = subject.strip(" ,;:.")
+    return subject
+
+
+def _extract_procedural_steps(
+    lines: list[str],
+    sections: dict[str, tuple[int, int]],
+    body_start: int,
+) -> list[dict[str, Any]]:
+    """Extract procedural steps from a skill body.
+
+    Procedural steps are found in:
+    - Sections titled "## Steps", "## Procedure", "## How to", "## Process", etc.
+    - Numbered lists anywhere in the body (1. ... 2. ...)
+    - Bullet lists with action verbs in procedural sections
+    """
+    steps: list[dict[str, Any]] = []
+    seen_lines: set[int] = set()
+
+    # 1. Extract from procedural sections.
+    for title, (start, end) in sections.items():
+        if not any(ps in title for ps in _PROCEDURAL_SECTIONS):
+            continue
+        for index in range(start, end):
+            if index in seen_lines:
+                continue
+            # Numbered list
+            num_match = _NUMBERED.match(lines[index])
+            if num_match:
+                steps.append({
+                    "id": f"step-{len(steps) + 1:04d}",
+                    "text": num_match.group("value"),
+                    "source_span": {"line": index + 1, "column": 1},
+                })
+                seen_lines.add(index)
+                continue
+            # Bullet list
+            bullet_match = _BULLET.match(lines[index])
+            if bullet_match:
+                steps.append({
+                    "id": f"step-{len(steps) + 1:04d}",
+                    "text": bullet_match.group("value"),
+                    "source_span": {"line": index + 1, "column": 1},
+                })
+                seen_lines.add(index)
+
+    # 2. Extract numbered lists from anywhere in the body.
+    for index in range(body_start, len(lines)):
+        if index in seen_lines:
+            continue
+        num_match = _NUMBERED.match(lines[index])
+        if num_match:
+            steps.append({
+                "id": f"step-{len(steps) + 1:04d}",
+                "text": num_match.group("value"),
+                "source_span": {"line": index + 1, "column": 1},
+            })
+            seen_lines.add(index)
+
+    return steps
 
 
 def _extract_checks(lines: list[str], sections: dict[str, tuple[int, int]]) -> list[dict[str, Any]]:

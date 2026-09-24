@@ -89,6 +89,8 @@ class RuleBasedProposer:
         finding_class = finding.get("class", "")
         if finding_class == "REQUIREMENT_WITHOUT_CHECK":
             return self._repair_requirement_without_check(finding, skill_text)
+        if finding_class == "METHODOLOGICAL_VACUITY":
+            return self._repair_methodological_vacuity(finding, skill_text)
         if finding_class == "BROKEN_REFERENCE":
             return self._repair_broken_reference(finding, skill_text)
         if finding_class == "STRUCTURAL_REDUNDANCY":
@@ -124,6 +126,55 @@ class RuleBasedProposer:
         return {
             "proposed_text": proposed,
             "rationale": "added a Checks section with a verification check",
+            "proposer": "rule-based",
+        }
+
+    def _repair_methodological_vacuity(
+        self, finding: dict[str, Any], skill_text: str
+    ) -> dict[str, Any]:
+        """Add procedural steps and checks to a vacuous skill.
+
+        A vacuous skill has rules but no steps and no checks. The repair
+        adds both a Steps section (how) and a Checks section (verification).
+        """
+        proposed = skill_text.rstrip()
+        rationale_parts = []
+        if "## Steps" not in skill_text:
+            steps_section = (
+                "\n## Steps\n\n"
+                "1. Identify the requirement that applies.\n"
+                "2. Apply the requirement to the current context.\n"
+            )
+            if "## Composes with" in proposed:
+                proposed = proposed.replace(
+                    "\n## Composes with",
+                    steps_section + "\n## Composes with",
+                )
+            else:
+                proposed = proposed + "\n" + steps_section
+            rationale_parts.append("a Steps section")
+        if "## Checks" not in skill_text:
+            check_section = (
+                "\n## Checks\n\n"
+                "- Verify the requirement is satisfied before proceeding.\n"
+            )
+            if "## Composes with" in proposed:
+                proposed = proposed.replace(
+                    "\n## Composes with",
+                    check_section + "\n## Composes with",
+                )
+            else:
+                proposed = proposed + "\n" + check_section
+            rationale_parts.append("a Checks section")
+        if not rationale_parts:
+            return {
+                "proposed_text": None,
+                "rationale": "skill already has Steps and Checks sections",
+                "proposer": "rule-based",
+            }
+        return {
+            "proposed_text": proposed,
+            "rationale": f"added {' and '.join(rationale_parts)}",
             "proposer": "rule-based",
         }
 
