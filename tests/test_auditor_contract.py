@@ -301,7 +301,7 @@ def test_limitations_are_documented(tmp_path: Path) -> None:
     Mutation: remove the limitations list -> red."""
     _write_skill(tmp_path, "l", "---\nname: l\ndescription: L.\n---\n\nA MUST stop.\n")
     audit = _audit(tmp_path)
-    assert len(audit["limitations"]) >= 4
+    assert len(audit["limitations"]) >= 3
     classes = {lim["check_class"] for lim in audit["limitations"]}
     assert "DESCRIPTION_BODY_GAP" in classes
     assert "CHECK_WITHOUT_ORACLE" in classes

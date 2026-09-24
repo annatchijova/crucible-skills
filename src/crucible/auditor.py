@@ -42,10 +42,6 @@ AUDIT_LIMITATIONS: list[dict[str, str]] = [
         "check_class": "CLAIM_WITHOUT_PROVENANCE",
         "reason": "The IR does not extract structured claims with numeric flags.",
     },
-    {
-        "check_class": "SCOPE_TRIGGER_MISMATCH",
-        "reason": "The IR does not extract declared triggers or scope inclusions/exclusions.",
-    },
 ]
 
 
@@ -81,6 +77,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_normative_conflict(skills))
     findings.extend(_check_semantic_redundancy(skills))
     findings.extend(_check_conditional_contradiction(skills))
+    findings.extend(_check_scope_trigger_mismatch(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -805,6 +802,87 @@ def _check_conditional_contradiction(
                     ),
                 ))
                 break  # one conflict per pair is enough
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# SCOPE_TRIGGER_MISMATCH
+# ---------------------------------------------------------------------------
+
+def _check_scope_trigger_mismatch(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """The declared trigger (from the description) shares zero meaningful
+    tokens with the rule content (from the body).
+
+    This is the conservative base for SCOPE_TRIGGER_MISMATCH. It extracts
+    the trigger clause from the description ("Use this skill whenever
+    X"), tokenizes it, and compares to the combined tokens of all rule
+    texts. If both token sets are non-empty and their intersection is
+    empty, the skill's declared scope and its actual normative content
+    are lexically disjoint — a CANDIDATE finding.
+
+    The check uses the same tokenizer and stopword list as
+    SEMANTIC_REDUNDANCY for consistency.
+
+    Limitation: lexical disjointness is not semantic disjointness. The
+    trigger and rules may use different vocabulary for the same domain
+    (e.g., "debugging" in the trigger and "retries" in the rules could
+    be related). The finding is CANDIDATE, not CONFIRMED.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        trigger = skill.get("trigger", {})
+        if not trigger.get("found"):
+            continue
+        trigger_text = trigger.get("text", "")
+        if not trigger_text:
+            continue
+        trigger_tokens = _tokenize(trigger_text)
+        if not trigger_tokens:
+            continue
+        # Build rule text token set from all rules.
+        rule_parts: list[str] = []
+        for rule in skill.get("rules", []):
+            rule_parts.append(rule.get("text", ""))
+        if not rule_parts:
+            continue
+        rule_tokens = _tokenize(" ".join(rule_parts))
+        if not rule_tokens:
+            continue
+        # Check for zero overlap.
+        intersection = trigger_tokens & rule_tokens
+        if intersection:
+            continue
+        # Zero overlap — CANDIDATE finding.
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        # Find the first rule for source evidence.
+        first_rule = skill["rules"][0] if skill.get("rules") else None
+        findings.append(_finding(
+            cls="SCOPE_TRIGGER_MISMATCH",
+            epistemic_status="CANDIDATE",
+            skill=name,
+            source_path=source_path,
+            source_span=first_rule["source_span"] if first_rule else None,
+            rule_id=first_rule["id"] if first_rule else None,
+            evidence=(
+                f"trigger tokens {sorted(trigger_tokens)[:5]}... share zero "
+                f"meaningful tokens with rule tokens "
+                f"{sorted(rule_tokens)[:5]}...; the declared activation "
+                f"scope and the normative content are lexically disjoint"
+            ),
+            violated_invariant=(
+                "a skill's declared trigger should share vocabulary with "
+                "its normative content; zero overlap suggests the trigger "
+                "describes a different domain than the rules"
+            ),
+            limitation=(
+                "lexical token disjointness is not semantic disjointness; "
+                "the trigger and rules may use different vocabulary for "
+                "the same domain; an LLM confirmation layer is deferred"
+            ),
+        ))
     return findings
 
 

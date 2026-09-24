@@ -65,6 +65,7 @@ def _compile_skill(path: Path, root: Path) -> dict[str, Any]:
             "content_digest": digest_bytes(raw_bytes),
         },
         "metadata": {key: frontmatter[key] for key in sorted(frontmatter)},
+        "trigger": _extract_trigger(frontmatter.get("description", "")),
         "rules": _extract_rules(lines, body_start),
         "checks": _extract_checks(lines, sections),
         "procedural_steps": _extract_procedural_steps(lines, sections, body_start),
@@ -142,6 +143,39 @@ def _section_ranges(lines: list[str], body_start: int) -> dict[str, tuple[int, i
         end = headings[position + 1][0] if position + 1 < len(headings) else len(lines)
         ranges[title] = (start + 1, end)
     return ranges
+
+
+# Trigger extraction patterns. These capture the clause that describes
+# when the skill should be activated, from the description text.
+_TRIGGER_PATTERNS = [
+    re.compile(
+        r"\buse\s+(?:this skill\s+)?(?:whenever|when|if|for)\b\s*(.+?)(?:[.;]|\Z)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        r"\btrigger(?:s|ed)?\s+(?:on|when|for)\b\s*(.+?)(?:[.;]|\Z)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+]
+
+
+def _extract_trigger(description: str) -> dict[str, Any]:
+    """Extract the trigger clause from a skill's description.
+
+    Returns a dict with:
+    - text: the raw trigger clause text (or "" if no trigger found)
+    - found: whether a trigger pattern was matched
+    """
+    for pattern in _TRIGGER_PATTERNS:
+        match = pattern.search(description)
+        if match:
+            raw = match.group(1).strip()
+            # Truncate at reasonable length to avoid capturing the entire
+            # description as a trigger clause.
+            if len(raw) > 300:
+                raw = raw[:300]
+            return {"text": raw, "found": True}
+    return {"text": "", "found": False}
 
 
 def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
