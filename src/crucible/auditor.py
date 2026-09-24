@@ -25,12 +25,7 @@ _CONFLICT_PAIRS = frozenset({
 
 # Checks the current IR cannot support, with the reason each is abstained.
 # These are emitted in every artifact so consumers know what was NOT assessed.
-AUDIT_LIMITATIONS: list[dict[str, str]] = [
-    {
-        "check_class": "CLAIM_WITHOUT_PROVENANCE",
-        "reason": "The IR does not extract structured claims with numeric flags.",
-    },
-]
+AUDIT_LIMITATIONS: list[dict[str, str]] = []
 
 
 def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
@@ -68,6 +63,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_scope_trigger_mismatch(skills))
     findings.extend(_check_description_body_gap(skills))
     findings.extend(_check_without_oracle(skills))
+    findings.extend(_check_claim_without_provenance(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -1006,6 +1002,71 @@ def _check_without_oracle(
                     "may be verifiable through domain-specific means "
                     "not captured by the patterns; the finding is "
                     "CANDIDATE, not CONFIRMED"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# CLAIM_WITHOUT_PROVENANCE
+# ---------------------------------------------------------------------------
+
+def _check_claim_without_provenance(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A normative rule that makes a factual claim (numeric value or
+    standards reference) without provenance.
+
+    The IR now extracts claims from each rule. A claim is a factual
+    assertion with a numeric value (percentage, time, count, year) or
+    a standards reference (NIST, OWASP, CWE, CVE, MITRE, ISO, RFC, W3C,
+    WCAG, WCA). Each claim records whether the rule text contains a
+    provenance indicator.
+
+    A claim without provenance is a CANDIDATE finding: the rule makes a
+    factual assertion but does not cite a source. The claim may be
+    common knowledge, derived from the skill's domain expertise, or
+    stated without evidence — the check cannot distinguish.
+
+    Limitation: provenance detection is pattern-based. A claim may have
+    provenance in a form not captured by the patterns (e.g., "as stated
+    in the documentation", "per the team's experience"). The finding is
+    CANDIDATE, not CONFIRMED.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        for rule in skill.get("rules", []):
+            claims = rule.get("claims", [])
+            if not claims:
+                continue
+            unprovenanced = [c for c in claims if not c["has_provenance"]]
+            if not unprovenanced:
+                continue
+            name = skill["identity"]["name"]
+            source_path = skill["identity"]["source_path"]
+            claim_descs = [f"{c['kind']} '{c['text']}'" for c in unprovenanced]
+            findings.append(_finding(
+                cls="CLAIM_WITHOUT_PROVENANCE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} makes claim(s) "
+                    f"{', '.join(claim_descs)} without provenance; "
+                    f"the rule text does not contain a source citation, "
+                    f"URL, standards reference, or provenance indicator"
+                ),
+                violated_invariant=(
+                    "a normative rule that makes a factual claim should "
+                    "cite its source so the claim can be verified"
+                ),
+                limitation=(
+                    "provenance detection is pattern-based; a claim may "
+                    "have provenance in a form not captured by the "
+                    "patterns (e.g., 'as stated in the documentation'); "
+                    "the finding is CANDIDATE, not CONFIRMED"
                 ),
             ))
     return findings

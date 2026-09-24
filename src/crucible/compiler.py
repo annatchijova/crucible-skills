@@ -189,12 +189,14 @@ def _extract_rules(lines: list[str], body_start: int) -> list[dict[str, Any]]:
             text = lines[index].strip()
             subject = _extract_subject(text, raw_modality)
             conditions = _extract_conditions(text)
+            claims = _extract_claims(text)
             rules.append({
                 "id": f"rule-{len(rules) + 1:04d}",
                 "extraction_status": "candidate",
                 "modality": modality,
                 "subject": subject,
                 "conditions": conditions,
+                "claims": claims,
                 "text": text,
                 "source_span": {"line": index + 1, "column": match.start(1) + 1},
             })
@@ -248,6 +250,57 @@ def _extract_conditions(rule_text: str) -> list[dict[str, str]]:
     # Sort for determinism.
     conditions.sort(key=lambda c: (c["text"], c["type"]))
     return conditions
+
+
+# Claim extraction patterns. A claim is a factual assertion that carries
+# a numeric value or standards reference and therefore needs provenance.
+# Each claim is {text, kind, has_provenance}.
+_CLAIM_VALUE_PATTERNS = [
+    (re.compile(r"\b\d+%(?!\w)"), "percentage"),
+    (re.compile(r"\b\d+\s*(?:ms|seconds?|minutes?|hours?|days?|weeks?|months?|years?)\b", re.IGNORECASE), "time"),
+    (re.compile(r"\b\d+\s*(?:x|times|iterations?|attempts?|retries?)\b", re.IGNORECASE), "count"),
+    (re.compile(r"\b(?:NIST|OWASP|CWE|CVE|MITRE|ISO|RFC|W3C|WCAG|WCA)\b\s*(?:SP\s*)?\d+", re.IGNORECASE), "standard"),
+    (re.compile(r"\b\d{4}\b"), "year"),
+]
+
+# Provenance indicators. If any of these appear in the rule text, the
+# claim is considered to have provenance.
+_PROVENANCE_PATTERNS = [
+    re.compile(r"\b(?:per|according to|source:|see|ref:|citation:|from)\b", re.IGNORECASE),
+    re.compile(r"\[(?:NIST|OWASP|CWE|CVE|MITRE|ISO|RFC|W3C|WCAG|WCA)\b", re.IGNORECASE),
+    re.compile(r"\b(?:NIST|OWASP|CWE|CVE|MITRE|ISO|RFC|W3C|WCAG|WCA)\b\s*(?:SP\s*)?\d+", re.IGNORECASE),
+    re.compile(r"\([^)]*\d{4}\)"),
+    re.compile(r"https?://"),
+]
+
+
+def _extract_claims(rule_text: str) -> list[dict[str, Any]]:
+    """Extract claims from a rule's text.
+
+    A claim is a factual assertion with a numeric value or standards
+    reference. Each claim records:
+    - text: the matched value
+    - kind: the claim kind (percentage, time, count, standard, year)
+    - has_provenance: whether the rule text contains a provenance indicator
+    """
+    claims: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    has_provenance = any(p.search(rule_text) for p in _PROVENANCE_PATTERNS)
+    for pattern, kind in _CLAIM_VALUE_PATTERNS:
+        for match in pattern.finditer(rule_text):
+            value = match.group(0).strip()
+            key = f"{kind}:{value}"
+            if key in seen:
+                continue
+            seen.add(key)
+            claims.append({
+                "text": value,
+                "kind": kind,
+                "has_provenance": has_provenance,
+            })
+    # Sort for determinism.
+    claims.sort(key=lambda c: (c["kind"], c["text"]))
+    return claims
 
 
 def _extract_subject(rule_text: str, raw_modality: str) -> str:
