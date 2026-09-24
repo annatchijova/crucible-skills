@@ -106,6 +106,15 @@ def test_full_pipeline_l1_through_l6() -> None:
     assert bob_report["original_finding_gone"] is True
     assert bob_report["repaired_finding_count"] == 0
 
+    # L7: closed repair loop (uses local executor).
+    from crucible.repair_loop import run_repair_loop, LOOP_VERSION
+    loop_report = run_repair_loop(executor=LocalExecutor())
+    assert loop_report["loop_version"] == LOOP_VERSION
+    assert loop_report["outcome"] == "ACCEPTED"
+    assert loop_report["original_finding_gone"] is True
+    assert loop_report["behavioral_replay"]["regression"] is False
+    assert loop_report["loop_digest"].startswith("sha256:")
+
 
 def test_chain_of_custody_is_unbroken() -> None:
     """Every artifact carries the digests of its inputs.
@@ -158,6 +167,13 @@ def test_chain_of_custody_is_unbroken() -> None:
     assert bob_report["base_audit_digest"].startswith("sha256:")
     assert bob_report["repaired_audit_digest"].startswith("sha256:")
 
+    # L7 carries base + repaired audit digests + loop digest.
+    from crucible.repair_loop import run_repair_loop
+    loop_report = run_repair_loop(executor=LocalExecutor())
+    assert loop_report["base_audit_digest"].startswith("sha256:")
+    assert loop_report["repaired_audit_digest"].startswith("sha256:")
+    assert loop_report["loop_digest"].startswith("sha256:")
+
 
 def test_all_artifacts_are_versioned() -> None:
     """Every artifact carries a schema version. This is the contract that
@@ -190,3 +206,7 @@ def test_all_artifacts_are_versioned() -> None:
 
     bob_report = run_bob_workflow(proposer=RuleBasedProposer())
     assert bob_report["bob_version"] == "crucible-bob/v1"
+
+    from crucible.repair_loop import run_repair_loop
+    loop_report = run_repair_loop(executor=LocalExecutor())
+    assert loop_report["loop_version"] == "crucible-repair-loop/v1"

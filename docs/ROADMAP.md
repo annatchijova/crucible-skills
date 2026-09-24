@@ -202,9 +202,44 @@ LLM-out-of-the-loop. Cross-process outcome verified identical. See
 
 ## L7 — Closed repair loop
 
-**Outcome:** `find → explain → mutate/reproduce → repair → deterministic re-audit → behavioral replay → accept/reject` is a complete workflow.
+**Outcome:** `find → repair → deterministic re-audit → behavioral replay → accept/reject` is a complete workflow.
 
-**Exit evidence:** at least one repair restores a property without merely suppressing the original finding, and at least one bad repair is rejected.
+**Status:** implemented with rule-based proposer and local deterministic
+executor. The loop integrates L6 (Bob workflow) and L5 (behavioral
+differential) into a single closed workflow. Bob proposes a repair;
+Crucible re-audits deterministically (L6 acceptance criteria with the
+D1 set-difference novelty check); if the deterministic gate passes, the
+loop runs a behavioral replay (L5 property oracle) comparing the
+repaired skill against the original. If the repair fails a property
+that the original passed, it is REJECTED with `BEHAVIORAL_REGRESSION`.
+
+The acceptance criteria are:
+- ACCEPTED if: the targeted finding is gone (L6) AND no new findings
+  (L6) AND the repaired skill passes all properties that the original
+  passed (L5 behavioral replay).
+- REJECTED if: the targeted finding persists (L6) OR new findings appear
+  (L6) OR the repair fails a property that the original passed (L5).
+
+The executor is pluggable (LocalExecutor for testing, NebiusExecutor
+for Nemotron). Without `NEBIUS_API_KEY`, the behavioral replay uses
+LocalExecutor and the Nebius path is documented as BLOCKED. The LLM
+proposer is also BLOCKED without an API key.
+
+**Boundary:** Bob proposes; the property oracle observes; Crucible
+decides. The LLM never touches the decision path.
+
+**Must preserve:** L1-L6 invariants, plus loop determinism (same
+corpus + same proposer + same executor = same digest), no floats, no
+LLM in the decision path, honest BLOCKED for Nebius and LLM proposer,
+chain of custody (base + repaired audit digests + loop digest), and
+behavioral replay evidence.
+
+**Exit evidence:** 12 falsifiable tests cover acceptance, rejection
+(finding persists, new findings, behavioral regression, compile
+error), no findings, BLOCKED LLM proposer, determinism (same-process
+and cross-process), LLM-out-of-the-loop, behavioral replay details, and
+Nebius blocked status. Cross-process digest verified identical. See
+[L7 red-team review](red-team/2026-09-23-l7-repair-loop-review.md).
 
 ## L8 — CI and presentation surfaces
 

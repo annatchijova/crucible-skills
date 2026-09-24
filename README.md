@@ -100,13 +100,18 @@ This repository has the first six coherent implementation levels:
 - **L4 — Mutation laboratory:** seeds 8 defect classes against a known-good base fixture, runs the full pipeline, and classifies results as KILLED / SURVIVED / ABSTAINED. Survivors are classified by cause (INSUFFICIENT_DETECTOR, INSUFFICIENT_REPRESENTATION, OUT_OF_SCOPE). Kill rate: 4/6 (excluding abstained). The lab answers: when we introduce a defect we claim to detect, do we actually detect it?
 - **L5 — Behavioral differential:** runs the same task against 4 skill variants (no-skill, original, mutant, repair), observes 4 explicit properties with a deterministic oracle, and seals the report. The local executor shows the expected differential (mutant fails P3: unbounded retry). The Nebius/Nemotron executor is real code using the Token Factory API; execution is BLOCKED until an API key is available. The model is the subject of observation, not the judge.
 - **L6 — Bob workflow:** Bob receives audit findings, proposes a repair (rule-based or LLM via Nebius), and Crucible deterministically re-audits and accepts or rejects. Acceptance criteria: the targeted finding is gone AND no new findings AND the corpus compiles. Bob proposes; Crucible decides.
+- **L7 — Closed repair loop:** integrates L6 and L5 into a single closed workflow. Bob proposes a repair; Crucible re-audits deterministically (L6); if the deterministic gate passes, the loop runs a behavioral replay (L5 property oracle) comparing the repaired skill against the original. A repair that passes deterministic but fails behavioral is REJECTED with `BEHAVIORAL_REGRESSION`. Bob proposes; the property oracle observes; Crucible decides.
 
-L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. L6 accepts a rule-based repair for the REQUIREMENT_WITHOUT_CHECK finding; the LLM proposer is BLOCKED (no API key). The closed repair loop and UI levels remain explicitly in progress.
+L1 has been exercised against the local real corpus (103 skills, 140 extracted normative lines, 175 checks). L2 produces 1 finding (a CANDIDATE requirement-without-check) and 5 documented limitations. L3 produces 83 typed edges and reveals the corpus structure (12 hub skills, 4 disconnected components, 38 isolated skills). L4 produces 4 killed, 2 survived, 2 abstained, with honest survivor classification. L5 produces the expected behavioral differential with the local executor; Nebius execution is BLOCKED. L6 accepts a rule-based repair for the REQUIREMENT_WITHOUT_CHECK finding; the LLM proposer is BLOCKED (no API key). L7 accepts a rule-based repair that passes both deterministic re-audit and behavioral replay; the LLM proposer and Nebius executor are BLOCKED (no API key). The CI and presentation surfaces remain explicitly in progress.
 
-### Run L1-L6 locally
+### Run L1-L7 locally
 
 ```bash
 PYTHONPATH=src python3 -m pytest -q
+# Run the closed repair loop with rule-based proposer (L7, no API key needed):
+PYTHONPATH=src python3 -m crucible.cli --repair-loop --local-executor > repair-loop-report.json
+# Run the closed repair loop with LLM proposer (L7, needs NEBIUS_API_KEY):
+PYTHONPATH=src python3 -m crucible.cli --repair-loop --llm-proposer > repair-loop-report.json
 # Run the Bob workflow with rule-based proposer (L6, no API key needed):
 PYTHONPATH=src python3 -m crucible.cli --bob > bob-report.json
 # Run the Bob workflow with LLM proposer (L6, needs NEBIUS_API_KEY):
@@ -152,14 +157,17 @@ crucible-skills/
 │   ├── mutation.py        # L4: mutation laboratory
 │   ├── behavioral.py      # L5: behavioral differential harness
 │   ├── bob.py             # L6: Bob engineering workflow
-│   └── cli.py             # compile + audit + graph + mutate + behave + bob CLI
+│   ├── repair_loop.py     # L7: closed repair loop
+│   └── cli.py             # compile + audit + graph + mutate + behave + bob + repair-loop CLI
 └── tests/
     ├── test_compiler_contract.py  # L1 falsifiable contract tests
     ├── test_auditor_contract.py   # L2 falsifiable contract tests
     ├── test_graph_contract.py     # L3 falsifiable contract tests
     ├── test_mutation_contract.py  # L4 falsifiable contract tests
     ├── test_behavioral_contract.py # L5 falsifiable contract tests
-    └── test_bob_contract.py       # L6 falsifiable contract tests
+    ├── test_bob_contract.py       # L6 falsifiable contract tests
+    ├── test_repair_loop_contract.py # L7 falsifiable contract tests
+    └── test_end_to_end.py         # L1-L7 integration tests
 ```
 
 ## Why “Crucible”

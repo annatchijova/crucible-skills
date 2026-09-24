@@ -1,4 +1,4 @@
-"""Command-line surface for compilation, auditing, composition analysis, mutation testing, behavioral differential, and Bob workflow."""
+"""Command-line surface for compilation, auditing, composition analysis, mutation testing, behavioral differential, Bob workflow, and closed repair loop."""
 
 from __future__ import annotations
 
@@ -11,17 +11,18 @@ from .bob import LLMProposer, RuleBasedProposer, run_bob_workflow
 from .compiler import compile_corpus
 from .graph import build_composition_graph
 from .mutation import run_mutation_lab
+from .repair_loop import run_repair_loop
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
         prog="crucible",
-        description="Compile, audit, analyze, mutation-test, behaviorally evaluate, and repair a skill corpus.",
+        description="Compile, audit, analyze, mutation-test, behaviorally evaluate, repair, and close the loop on a skill corpus.",
     )
     parser.add_argument(
         "root",
         nargs="?",
-        help="directory containing SKILL.md files (required unless --mutate/--behave/--bob)",
+        help="directory containing SKILL.md files (required unless --mutate/--behave/--bob/--repair-loop)",
     )
     parser.add_argument(
         "--compile-only",
@@ -54,6 +55,11 @@ def main() -> int:
         help="run the L6 Bob workflow on the first finding",
     )
     parser.add_argument(
+        "--repair-loop",
+        action="store_true",
+        help="run the L7 closed repair loop (find -> repair -> re-audit -> behavioral replay -> accept/reject)",
+    )
+    parser.add_argument(
         "--llm-proposer",
         action="store_true",
         help="use the LLM proposer (Nemotron via Nebius) instead of rule-based",
@@ -83,8 +89,21 @@ def main() -> int:
         print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
 
+    if args.repair_loop:
+        if args.llm_proposer:
+            proposer = LLMProposer()
+        else:
+            proposer = RuleBasedProposer()
+        if args.local_executor:
+            executor = LocalExecutor()
+        else:
+            executor = None  # let the loop decide (Nebius or LocalExecutor fallback)
+        report = run_repair_loop(proposer=proposer, executor=executor)
+        print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
+
     if not args.root:
-        parser.error("root is required unless --mutate/--behave/--bob is given")
+        parser.error("root is required unless --mutate/--behave/--bob/--repair-loop is given")
 
     artifact = compile_corpus(args.root)
     if args.compile_only:
