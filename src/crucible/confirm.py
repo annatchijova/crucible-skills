@@ -60,7 +60,7 @@ class ConfirmExecutor(Protocol):
 NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
 NEBIUS_DEFAULT_MODEL = "nvidia/nemotron-3-super-120b-a12b"
 NEBIUS_DEFAULT_TEMPERATURE = 0
-NEBIUS_DEFAULT_MAX_TOKENS = 200
+NEBIUS_DEFAULT_MAX_TOKENS = 2000
 
 
 class NebiusConfirmExecutor:
@@ -121,25 +121,36 @@ class NebiusConfirmExecutor:
             },
             method="POST",
         )
-        try:
-            with urllib.request.urlopen(request, timeout=60) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            return {
-                "output": "",
-                "error": f"HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')[:200]}",
-                "model": self.model,
-                "provider": "nebius-token-factory",
-                "blocked": False,
-            }
-        except urllib.error.URLError as exc:
-            return {
-                "output": "",
-                "error": f"URL error: {exc}",
-                "model": self.model,
-                "provider": "nebius-token-factory",
-                "blocked": False,
-            }
+        # Retry on rate limiting (HTTP 429) with backoff.
+        import time
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                with urllib.request.urlopen(request, timeout=60) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+                break
+            except urllib.error.HTTPError as exc:
+                if exc.code == 429 and attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                return {
+                    "output": "",
+                    "error": f"HTTP {exc.code}: {exc.read().decode('utf-8', errors='replace')[:200]}",
+                    "model": self.model,
+                    "provider": "nebius-token-factory",
+                    "blocked": False,
+                }
+            except urllib.error.URLError as exc:
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+                return {
+                    "output": "",
+                    "error": f"URL error: {exc}",
+                    "model": self.model,
+                    "provider": "nebius-token-factory",
+                    "blocked": False,
+                }
         output = ""
         if result.get("choices"):
             output = result["choices"][0].get("message", {}).get("content", "")
@@ -337,14 +348,24 @@ def _skill_text(ir: dict[str, Any], skill_name: str) -> str:
     for skill in ir.get("skills", []):
         if skill["identity"]["name"] == skill_name:
             parts = []
-            # Description.
-            desc = skill.get("description", "")
+            # Description (stored under metadata.description in the IR).
+            desc = skill.get("metadata", {}).get("description", "")
             if desc:
                 parts.append(f"Description: {desc}")
-            # Rules.
+            # Trigger.
+            trigger = skill.get("trigger", "")
+            if trigger:
+                parts.append(f"Trigger: {trigger}")
+            # Raw body text (the full markdown body after frontmatter).
+            # This gives the executor the full context including
+            # non-RFC-2119 normative language the extractor may miss.
+            body_text = skill.get("body_text", "")
+            if body_text:
+                parts.append(f"Body:\n{body_text}")
+            # Extracted rules.
             for rule in skill.get("rules", []):
                 parts.append(f"Rule: {rule.get('text', '')}")
-            # Checks.
+            # Extracted checks.
             for check in skill.get("checks", []):
                 parts.append(f"Check: {check.get('text', '')}")
             # Procedural steps.
@@ -410,14 +431,34 @@ _CONFIRMATION_SYSTEM_PROMPT = (
 
 
 def _build_check_without_oracle_prompt(
-    finding: dict[str, Any], skill_text: str
+    finding: dict[str, Any], skill_text: str, ir: dict[str, Any] | None = None
 ) -> tuple[str, str]:
     """Prompt for CHECK_WITHOUT_ORACLE: is the check verifiable?"""
     evidence = finding.get("evidence", "")
+    skill_name = finding.get("skill", "")
+    # Try to extract the specific check text from the IR.
+    check_text = ""
+    if ir is not None:
+        import re as _re
+        check_id_match = _re.search(r"check-(\d+)", evidence)
+        if check_id_match:
+            check_id = f"check-{check_id_match.group(1).zfill(4)}"
+            for s in ir.get("skills", []):
+                if s["identity"]["name"] == skill_name:
+                    for c in s.get("checks", []):
+                        if c.get("id") == check_id:
+                            check_text = c.get("text", "")
+                            break
+                    break
+    check_section = (
+        f"\n\nFLAGGED CHECK: {check_text}"
+        if check_text
+        else ""
+    )
     return (
         _CONFIRMATION_SYSTEM_PROMPT,
         (
-            f"SKILL:\n{skill_text}\n\n"
+            f"SKILL:\n{skill_text}{check_section}\n\n"
             f"FINDING: {evidence}\n\n"
             f"QUESTION: The deterministic auditor flagged a check as "
             f"having no recognizable verification oracle (no question "
@@ -708,7 +749,12 @@ def confirm_candidates(
             }
         elif cls in _PROMPT_BUILDERS:
             builder = _PROMPT_BUILDERS[cls]
-            system_prompt, user_prompt = builder(finding, skill_text)
+            # Pass ir for builders that need it (e.g., CHECK_WITHOUT_ORACLE
+            # extracts the specific check text from the IR).
+            try:
+                system_prompt, user_prompt = builder(finding, skill_text, ir)
+            except TypeError:
+                system_prompt, user_prompt = builder(finding, skill_text)
             extra_fields = {"skill": skill_name}
         else:
             # No prompt builder for this class; skip.
@@ -722,6 +768,18 @@ def confirm_candidates(
                 "finding_class": cls,
                 "verdict": "BLOCKED",
                 "rationale": response.get("error", "Executor blocked"),
+                "executor_model": response.get("model", ""),
+                "executor_provider": response.get("provider", ""),
+                **extra_fields,
+            })
+            continue
+        # Check for API errors (not blocked, but error present).
+        if response.get("error"):
+            confirmations.append({
+                "finding_id": finding.get("id", ""),
+                "finding_class": cls,
+                "verdict": "UNCLEAR",
+                "rationale": f"Executor error: {response['error'][:200]}",
                 "executor_model": response.get("model", ""),
                 "executor_provider": response.get("provider", ""),
                 **extra_fields,

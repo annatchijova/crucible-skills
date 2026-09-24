@@ -12,6 +12,7 @@ from .compiler import compile_corpus
 from .confirm import (
     MockConfirmExecutor,
     NebiusConfirmExecutor,
+    confirm_candidates,
     confirm_semantic_redundancy,
 )
 from .graph import build_composition_graph

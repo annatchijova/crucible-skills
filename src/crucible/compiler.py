@@ -58,6 +58,7 @@ def _compile_skill(path: Path, root: Path) -> dict[str, Any]:
         raise ValueError(f"{relative_path}: frontmatter requires description")
 
     sections = _section_ranges(lines, body_start)
+    body_text = "\n".join(lines[body_start:])
     return {
         "identity": {
             "name": name,
@@ -66,6 +67,7 @@ def _compile_skill(path: Path, root: Path) -> dict[str, Any]:
         },
         "metadata": {key: frontmatter[key] for key in sorted(frontmatter)},
         "trigger": _extract_trigger(frontmatter.get("description", "")),
+        "body_text": body_text,
         "rules": _extract_rules(lines, body_start),
         "checks": _extract_checks(lines, sections),
         "procedural_steps": _extract_procedural_steps(lines, sections, body_start),
