@@ -71,6 +71,14 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_missing_failure_mode(skills))
     findings.extend(_check_non_deterministic(skills))
     findings.extend(_check_irreversible_without_review(skills))
+    findings.extend(_check_secret_in_output(skills))
+    findings.extend(_check_silent_failure(skills))
+    findings.extend(_check_hardcoded_credential(skills))
+    findings.extend(_check_unbounded_resource(skills))
+    findings.extend(_check_unvalidated_external_input(skills))
+    findings.extend(_check_missing_timeout(skills))
+    findings.extend(_check_floating_point_in_decision_path(skills))
+    findings.extend(_check_unpinned_dependency(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -1709,6 +1717,1039 @@ def _check_irreversible_without_review(
                     "pattern-based; a skill may describe an irreversible "
                     "action or its bounds using vocabulary not captured "
                     "by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# SECRET_IN_OUTPUT
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a secret is being sent to an output channel.
+_SECRET_IN_OUTPUT_PATTERNS = [
+    re.compile(
+        r"\b(log|print|echo|console\.log|stdout|stderr|output|display|show|"
+        r"expose|reveal|return|include)\b"
+        r".*\b(secret|password|token|api\s*key|credential|private\s*key|"
+        r"access\s*key|session\s*key)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(secret|password|token|api\s*key|credential|private\s*key|"
+        r"access\s*key|session\s*key)\b"
+        r".*\b(log|print|echo|console\.log|stdout|stderr|output|display|"
+        r"show|expose|reveal|return|include)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Patterns that indicate the secret is protected (redacted, masked, hashed).
+_SECRET_PROTECTION_PATTERNS = [
+    re.compile(r"\bredact(?:ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bmask(?:ed)?\b", re.IGNORECASE),
+    re.compile(r"\bhash(?:ed)?\b", re.IGNORECASE),
+    re.compile(r"\bencrypt(?:ed)?\b", re.IGNORECASE),
+    re.compile(r"\bdo\s+not\s+(?:log|print|output|echo)\b", re.IGNORECASE),
+    re.compile(r"\bnever\s+(?:log|print|output|echo)\b", re.IGNORECASE),
+    re.compile(r"\bavoid\s+(?:log|print|output|echo)ging\b", re.IGNORECASE),
+    re.compile(r"\bscrub(?:bed)?\b", re.IGNORECASE),
+    re.compile(r"\bsanitiz(?:e|ed)\b", re.IGNORECASE),
+]
+
+
+def _check_secret_in_output(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs sending a secret to an output channel
+    (log, print, echo, stdout, display) without protection (redact, mask,
+    hash, encrypt).
+
+    Leaking secrets to logs or output is a universal security defect: it
+    exposes credentials to anyone with access to the output channel. No
+    methodology considers this correct.
+
+    Limitation: pattern-based. A skill may describe secret output or
+    protection using vocabulary not captured by the patterns. The finding
+    is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_leak = any(p.search(text) for p in _SECRET_IN_OUTPUT_PATTERNS)
+            if not has_leak:
+                continue
+            has_protection = any(
+                p.search(text) for p in _SECRET_PROTECTION_PATTERNS
+            )
+            if has_protection:
+                continue
+            findings.append(_finding(
+                cls="SECRET_IN_OUTPUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs sending a secret to an "
+                    f"output channel (log, print, echo, stdout) without "
+                    f"protection (redact, mask, hash, encrypt)"
+                ),
+                violated_invariant=(
+                    "a secret must not be sent to an output channel without "
+                    "redaction, masking, hashing, or encryption; leaked "
+                    "credentials are exposed to anyone with output access"
+                ),
+                limitation=(
+                    "secret-output and protection detection are pattern-"
+                    "based; a skill may describe secret output or protection "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_leak = any(p.search(text) for p in _SECRET_IN_OUTPUT_PATTERNS)
+            if not has_leak:
+                continue
+            has_protection = any(
+                p.search(text) for p in _SECRET_PROTECTION_PATTERNS
+            )
+            if has_protection:
+                continue
+            findings.append(_finding(
+                cls="SECRET_IN_OUTPUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs sending a secret to an "
+                    f"output channel (log, print, echo, stdout) without "
+                    f"protection (redact, mask, hash, encrypt)"
+                ),
+                violated_invariant=(
+                    "a secret must not be sent to an output channel without "
+                    "redaction, masking, hashing, or encryption; leaked "
+                    "credentials are exposed to anyone with output access"
+                ),
+                limitation=(
+                    "secret-output and protection detection are pattern-"
+                    "based; a skill may describe secret output or protection "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# SILENT_FAILURE
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate an error is being silently suppressed.
+_SILENT_FAILURE_PATTERNS = [
+    re.compile(r"\bignore\s+(?:the\s+)?error\b", re.IGNORECASE),
+    re.compile(r"\bignore\s+(?:the\s+)?exception\b", re.IGNORECASE),
+    re.compile(r"\bswallow\s+(?:the\s+)?error\b", re.IGNORECASE),
+    re.compile(r"\bswallow\s+(?:the\s+)?exception\b", re.IGNORECASE),
+    re.compile(r"\bsuppress\s+(?:the\s+)?error\b", re.IGNORECASE),
+    re.compile(r"\bsuppress\s+(?:the\s+)?exception\b", re.IGNORECASE),
+    re.compile(r"\bcatch\s+and\s+continue\b", re.IGNORECASE),
+    re.compile(r"\bon\s+error\s+resume\s+next\b", re.IGNORECASE),
+    re.compile(r"\bsilently\s+(?:ignore|continue|proceed|succeed)\b", re.IGNORECASE),
+    re.compile(r"\bcontinue\s+on\s+error\b", re.IGNORECASE),
+    re.compile(r"\bpass\s+on\s+error\b", re.IGNORECASE),
+]
+
+# Patterns that indicate the error is actually handled (logged, raised, etc.)
+_ERROR_HANDLING_PATTERNS = [
+    re.compile(r"\blog\b", re.IGNORECASE),
+    re.compile(r"\breport\b", re.IGNORECASE),
+    re.compile(r"\braise\b", re.IGNORECASE),
+    re.compile(r"\bthrow\b", re.IGNORECASE),
+    re.compile(r"\babort\b", re.IGNORECASE),
+    re.compile(r"\bfail\b", re.IGNORECASE),
+    re.compile(r"\bnotify\b", re.IGNORECASE),
+    re.compile(r"\balert\b", re.IGNORECASE),
+    re.compile(r"\bhandle\b", re.IGNORECASE),
+    re.compile(r"\bretry\b", re.IGNORECASE),
+]
+
+
+def _check_silent_failure(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs suppressing an error silently (ignore,
+    swallow, suppress, catch and continue) without logging, reporting, or
+    handling.
+
+    Silent failures are a universal engineering defect: the system
+    continues as if nothing went wrong, hiding the root cause and making
+    debugging impossible. A crash is better than a silent corruption.
+
+    Limitation: pattern-based. A skill may describe silent failure or
+    error handling using vocabulary not captured by the patterns. The
+    finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_silent = any(p.search(text) for p in _SILENT_FAILURE_PATTERNS)
+            if not has_silent:
+                continue
+            has_handling = any(
+                p.search(text) for p in _ERROR_HANDLING_PATTERNS
+            )
+            if has_handling:
+                continue
+            findings.append(_finding(
+                cls="SILENT_FAILURE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs suppressing an error "
+                    f"silently (ignore, swallow, suppress, catch and "
+                    f"continue) without handling (log, report, raise, "
+                    f"abort, retry)"
+                ),
+                violated_invariant=(
+                    "an error must not be silently suppressed; a silent "
+                    "failure hides the root cause and makes debugging "
+                    "impossible; a crash is better than a silent corruption"
+                ),
+                limitation=(
+                    "silent-failure and error-handling detection are "
+                    "pattern-based; a skill may describe suppression or "
+                    "handling using vocabulary not captured by the "
+                    "patterns; the finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_silent = any(p.search(text) for p in _SILENT_FAILURE_PATTERNS)
+            if not has_silent:
+                continue
+            has_handling = any(
+                p.search(text) for p in _ERROR_HANDLING_PATTERNS
+            )
+            if has_handling:
+                continue
+            findings.append(_finding(
+                cls="SILENT_FAILURE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs suppressing an error "
+                    f"silently (ignore, swallow, suppress, catch and "
+                    f"continue) without handling (log, report, raise, "
+                    f"abort, retry)"
+                ),
+                violated_invariant=(
+                    "an error must not be silently suppressed; a silent "
+                    "failure hides the root cause and makes debugging "
+                    "impossible; a crash is better than a silent corruption"
+                ),
+                limitation=(
+                    "silent-failure and error-handling detection are "
+                    "pattern-based; a skill may describe suppression or "
+                    "handling using vocabulary not captured by the "
+                    "patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# HARDCODED_CREDENTIAL
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a credential is being hardcoded.
+_HARDCODED_CREDENTIAL_PATTERNS = [
+    re.compile(
+        r"\b(hardcode|hard-?code|embed|inline)\b"
+        r".*\b(secret|password|token|api\s*key|credential|private\s*key)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(put|set|store|write|place)\b"
+        r".*\b(secret|password|token|api\s*key|credential|private\s*key)\b"
+        r".*\b(in\s+the\s+code|in\s+source\s+code|in\s+the\s+config|"
+        r"in\s+the\s+script|directly)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Patterns that indicate the credential is stored securely.
+_SECURE_CREDENTIAL_PATTERNS = [
+    re.compile(r"\benvironment\s+variable\b", re.IGNORECASE),
+    re.compile(r"\bsecret\s+manager\b", re.IGNORECASE),
+    re.compile(r"\bvault\b", re.IGNORECASE),
+    re.compile(r"\bkey\s+management\s+service\b", re.IGNORECASE),
+    re.compile(r"\bKMS\b"),
+    re.compile(r"\bdo\s+not\s+hardcode\b", re.IGNORECASE),
+    re.compile(r"\bnever\s+hardcode\b", re.IGNORECASE),
+    re.compile(r"\bavoid\s+hardcoding\b", re.IGNORECASE),
+    re.compile(r"\b\.env\b"),
+]
+
+
+def _check_hardcoded_credential(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs hardcoding a credential (secret,
+    password, token, API key) in code or config.
+
+    Hardcoding credentials is a universal security defect: the credential
+    is visible in source control, logs, and stack traces, and cannot be
+    rotated without a code change. No methodology considers this correct.
+
+    Limitation: pattern-based. A skill may describe hardcoding or secure
+    storage using vocabulary not captured by the patterns. The finding
+    is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_hardcode = any(
+                p.search(text) for p in _HARDCODED_CREDENTIAL_PATTERNS
+            )
+            if not has_hardcode:
+                continue
+            has_secure = any(
+                p.search(text) for p in _SECURE_CREDENTIAL_PATTERNS
+            )
+            if has_secure:
+                continue
+            findings.append(_finding(
+                cls="HARDCODED_CREDENTIAL",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs hardcoding a credential "
+                    f"(secret, password, token, API key) in code or config"
+                ),
+                violated_invariant=(
+                    "a credential must not be hardcoded in code or config; "
+                    "hardcoded credentials are visible in source control, "
+                    "logs, and stack traces, and cannot be rotated without "
+                    "a code change"
+                ),
+                limitation=(
+                    "hardcoding and secure-storage detection are pattern-"
+                    "based; a skill may describe hardcoding or secure "
+                    "storage using vocabulary not captured by the "
+                    "patterns; the finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_hardcode = any(
+                p.search(text) for p in _HARDCODED_CREDENTIAL_PATTERNS
+            )
+            if not has_hardcode:
+                continue
+            has_secure = any(
+                p.search(text) for p in _SECURE_CREDENTIAL_PATTERNS
+            )
+            if has_secure:
+                continue
+            findings.append(_finding(
+                cls="HARDCODED_CREDENTIAL",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs hardcoding a credential "
+                    f"(secret, password, token, API key) in code or config"
+                ),
+                violated_invariant=(
+                    "a credential must not be hardcoded in code or config; "
+                    "hardcoded credentials are visible in source control, "
+                    "logs, and stack traces, and cannot be rotated without "
+                    "a code change"
+                ),
+                limitation=(
+                    "hardcoding and secure-storage detection are pattern-"
+                    "based; a skill may describe hardcoding or secure "
+                    "storage using vocabulary not captured by the "
+                    "patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# UNBOUNDED_RESOURCE
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate unbounded resource consumption.
+_UNBOUNDED_RESOURCE_PATTERNS = [
+    re.compile(r"\b(load|read|collect|gather|fetch|buffer|cache)\s+all\b", re.IGNORECASE),
+    re.compile(r"\bread\s+everything\b", re.IGNORECASE),
+    re.compile(r"\bload\s+everything\b", re.IGNORECASE),
+    re.compile(r"\bload\s+the\s+entire\b", re.IGNORECASE),
+    re.compile(r"\bread\s+the\s+entire\b", re.IGNORECASE),
+    re.compile(r"\bload\s+into\s+memory\b", re.IGNORECASE),
+    re.compile(r"\bread\s+into\s+memory\b", re.IGNORECASE),
+]
+
+# Patterns that indicate a bound on resource consumption.
+_RESOURCE_BOUND_PATTERNS = [
+    re.compile(r"\blimit\b", re.IGNORECASE),
+    re.compile(r"\bmax(?:imum)?\b", re.IGNORECASE),
+    re.compile(r"\bcap\b", re.IGNORECASE),
+    re.compile(r"\bbatch(?:es|ed|ing)?\b", re.IGNORECASE),
+    re.compile(r"\bchunk\b", re.IGNORECASE),
+    re.compile(r"\bstream\b", re.IGNORECASE),
+    re.compile(r"\bpaginat(?:e|ed|ion)\b", re.IGNORECASE),
+    re.compile(r"\bspars(?:e|ely)\b", re.IGNORECASE),
+    re.compile(r"\bsampl(?:e|ed|ing)\b", re.IGNORECASE),
+    re.compile(r"\blazy\b", re.IGNORECASE),
+    re.compile(r"\bon\s+demand\b", re.IGNORECASE),
+]
+
+
+def _check_unbounded_resource(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs loading, reading, or collecting all of
+    something without a limit, batch, or streaming bound.
+
+    Unbounded resource consumption is a universal engineering defect: it
+    can exhaust memory, disk, or network bandwidth. "Load all files into
+    memory" without a limit is dangerous regardless of methodology.
+
+    Limitation: pattern-based. A skill may describe unbounded consumption
+    or its bounds using vocabulary not captured by the patterns. The
+    finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_unbounded = any(
+                p.search(text) for p in _UNBOUNDED_RESOURCE_PATTERNS
+            )
+            if not has_unbounded:
+                continue
+            has_bound = any(
+                p.search(text) for p in _RESOURCE_BOUND_PATTERNS
+            )
+            if has_bound:
+                continue
+            findings.append(_finding(
+                cls="UNBOUNDED_RESOURCE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs unbounded resource "
+                    f"consumption (load all, read all, collect all, load "
+                    f"into memory) without a bound (limit, max, batch, "
+                    f"stream, paginate)"
+                ),
+                violated_invariant=(
+                    "resource consumption must be bounded; loading all "
+                    "data into memory without a limit, batch, or stream "
+                    "can exhaust memory, disk, or network bandwidth"
+                ),
+                limitation=(
+                    "unbounded-resource and bound detection are pattern-"
+                    "based; a skill may describe consumption or bounds "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_unbounded = any(
+                p.search(text) for p in _UNBOUNDED_RESOURCE_PATTERNS
+            )
+            if not has_unbounded:
+                continue
+            has_bound = any(
+                p.search(text) for p in _RESOURCE_BOUND_PATTERNS
+            )
+            if has_bound:
+                continue
+            findings.append(_finding(
+                cls="UNBOUNDED_RESOURCE",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs unbounded resource "
+                    f"consumption (load all, read all, collect all, load "
+                    f"into memory) without a bound (limit, max, batch, "
+                    f"stream, paginate)"
+                ),
+                violated_invariant=(
+                    "resource consumption must be bounded; loading all "
+                    "data into memory without a limit, batch, or stream "
+                    "can exhaust memory, disk, or network bandwidth"
+                ),
+                limitation=(
+                    "unbounded-resource and bound detection are pattern-"
+                    "based; a skill may describe consumption or bounds "
+                    "using vocabulary not captured by the patterns; the "
+                    "finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# UNVALIDATED_EXTERNAL_INPUT
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate external input is being accepted.
+_EXTERNAL_INPUT_PATTERNS = [
+    re.compile(
+        r"\b(parse|accept|process|read|load|ingest|consume|receive|handle)\b"
+        r".*\b(user\s+input|request|stdin|argv|command\s+line\s+argument|"
+        r"environment\s+variable|query\s+parameter|form\s+data|"
+        r"uploaded\s+file|untrusted\s+(?:input|data|source))\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(user\s+input|request|stdin|argv|command\s+line\s+argument|"
+        r"environment\s+variable|query\s+parameter|form\s+data|"
+        r"uploaded\s+file|untrusted\s+(?:input|data|source))\b"
+        r".*\b(parse|accept|process|read|load|ingest|consume|receive|handle)\b",
+        re.IGNORECASE,
+    ),
+]
+
+# Patterns that indicate validation is present.
+_INPUT_VALIDATION_PATTERNS = [
+    re.compile(r"\bvalidat(?:e|ed|ion)\b", re.IGNORECASE),
+    re.compile(r"\bsanitiz(?:e|ed|ation)\b", re.IGNORECASE),
+    re.compile(r"\bschema\b", re.IGNORECASE),
+    re.compile(r"\btype\s+check\b", re.IGNORECASE),
+    re.compile(r"\bbound(?:ary)?\s+check\b", re.IGNORECASE),
+    re.compile(r"\bassert\b", re.IGNORECASE),
+    re.compile(r"\bverify\b", re.IGNORECASE),
+    re.compile(r"\bcheck\b", re.IGNORECASE),
+    re.compile(r"\bguard\b", re.IGNORECASE),
+    re.compile(r"\bfilter\b", re.IGNORECASE),
+    re.compile(r"\bdenylist\b", re.IGNORECASE),
+    re.compile(r"\ballowlist\b", re.IGNORECASE),
+    re.compile(r"\bparse\s+into\s+types?\b", re.IGNORECASE),
+]
+
+
+def _check_unvalidated_external_input(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs accepting external input (user input,
+    request, stdin, argv, uploaded file, untrusted source) without
+    validation, sanitization, or type checking.
+
+    Accepting unvalidated external input is a universal engineering
+    defect (validate at the boundary): it allows malformed, hostile, or
+    unexpected data to reach deep inside the system where it can cause
+    silent corruption or security vulnerabilities. No methodology
+    considers this correct.
+
+    Limitation: pattern-based. A skill may describe external input or
+    validation using vocabulary not captured by the patterns. The
+    finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_input = any(p.search(text) for p in _EXTERNAL_INPUT_PATTERNS)
+            if not has_input:
+                continue
+            has_validation = any(
+                p.search(text) for p in _INPUT_VALIDATION_PATTERNS
+            )
+            if has_validation:
+                continue
+            findings.append(_finding(
+                cls="UNVALIDATED_EXTERNAL_INPUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs accepting external input "
+                    f"(user input, request, stdin, argv, uploaded file) "
+                    f"without validation (validate, sanitize, schema, "
+                    f"type check, assert)"
+                ),
+                violated_invariant=(
+                    "external input must be validated at the boundary; "
+                    "unvalidated input allows malformed, hostile, or "
+                    "unexpected data to reach deep inside the system "
+                    "where it can cause silent corruption or security "
+                    "vulnerabilities"
+                ),
+                limitation=(
+                    "external-input and validation detection are pattern-"
+                    "based; a skill may describe input or validation using "
+                    "vocabulary not captured by the patterns; the finding "
+                    "is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_input = any(p.search(text) for p in _EXTERNAL_INPUT_PATTERNS)
+            if not has_input:
+                continue
+            has_validation = any(
+                p.search(text) for p in _INPUT_VALIDATION_PATTERNS
+            )
+            if has_validation:
+                continue
+            findings.append(_finding(
+                cls="UNVALIDATED_EXTERNAL_INPUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs accepting external input "
+                    f"(user input, request, stdin, argv, uploaded file) "
+                    f"without validation (validate, sanitize, schema, "
+                    f"type check, assert)"
+                ),
+                violated_invariant=(
+                    "external input must be validated at the boundary; "
+                    "unvalidated input allows malformed, hostile, or "
+                    "unexpected data to reach deep inside the system "
+                    "where it can cause silent corruption or security "
+                    "vulnerabilities"
+                ),
+                limitation=(
+                    "external-input and validation detection are pattern-"
+                    "based; a skill may describe input or validation using "
+                    "vocabulary not captured by the patterns; the finding "
+                    "is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# MISSING_TIMEOUT
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate an operation waits without a timeout.
+_MISSING_TIMEOUT_PATTERNS = [
+    re.compile(r"\bwait\s+indefinitely\b", re.IGNORECASE),
+    re.compile(r"\bblock\s+forever\b", re.IGNORECASE),
+    re.compile(r"\bwait\s+forever\b", re.IGNORECASE),
+    re.compile(r"\blisten\s+indefinitely\b", re.IGNORECASE),
+    re.compile(r"\bpoll\s+indefinitely\b", re.IGNORECASE),
+    re.compile(r"\bwait\s+without\s+(?:a\s+)?timeout\b", re.IGNORECASE),
+    re.compile(r"\bblock\s+without\s+(?:a\s+)?timeout\b", re.IGNORECASE),
+    re.compile(r"\bwait\s+until\s+(?:it\s+)?succeeds?\b", re.IGNORECASE),
+    re.compile(r"\bwait\s+until\s+(?:it\s+)?completes?\b", re.IGNORECASE),
+    re.compile(r"\bblock\s+until\s+(?:it\s+)?finishes?\b", re.IGNORECASE),
+]
+
+# Patterns that indicate a timeout or deadline is present.
+_TIMEOUT_PATTERNS = [
+    re.compile(r"\btimeout\b", re.IGNORECASE),
+    re.compile(r"\bdeadline\b", re.IGNORECASE),
+    re.compile(r"\bmax\s+wait\b", re.IGNORECASE),
+    re.compile(r"\btime\s+limit\b", re.IGNORECASE),
+    re.compile(r"\bduration\b", re.IGNORECASE),
+    re.compile(r"\bexpire(?:s|d|y)?\b", re.IGNORECASE),
+    re.compile(r"\bTTL\b"),
+]
+
+
+def _check_missing_timeout(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs waiting, blocking, or polling without a
+    timeout or deadline.
+
+    Waiting without a timeout is a universal engineering defect: the
+    operation can hang forever if the expected event never arrives. No
+    methodology considers an indefinite wait correct.
+
+    Limitation: pattern-based. A skill may describe waiting or timeouts
+    using vocabulary not captured by the patterns. The finding is
+    CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_wait = any(p.search(text) for p in _MISSING_TIMEOUT_PATTERNS)
+            if not has_wait:
+                continue
+            has_timeout = any(p.search(text) for p in _TIMEOUT_PATTERNS)
+            if has_timeout:
+                continue
+            findings.append(_finding(
+                cls="MISSING_TIMEOUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs waiting or blocking "
+                    f"without a timeout (wait indefinitely, block forever, "
+                    f"wait until success) without a deadline (timeout, "
+                    f"deadline, max wait, TTL)"
+                ),
+                violated_invariant=(
+                    "a wait or block must have a timeout or deadline; an "
+                    "indefinite wait can hang forever if the expected "
+                    "event never arrives"
+                ),
+                limitation=(
+                    "wait and timeout detection are pattern-based; a skill "
+                    "may describe waiting or timeouts using vocabulary not "
+                    "captured by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_wait = any(p.search(text) for p in _MISSING_TIMEOUT_PATTERNS)
+            if not has_wait:
+                continue
+            has_timeout = any(p.search(text) for p in _TIMEOUT_PATTERNS)
+            if has_timeout:
+                continue
+            findings.append(_finding(
+                cls="MISSING_TIMEOUT",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs waiting or blocking "
+                    f"without a timeout (wait indefinitely, block forever, "
+                    f"wait until success) without a deadline (timeout, "
+                    f"deadline, max wait, TTL)"
+                ),
+                violated_invariant=(
+                    "a wait or block must have a timeout or deadline; an "
+                    "indefinite wait can hang forever if the expected "
+                    "event never arrives"
+                ),
+                limitation=(
+                    "wait and timeout detection are pattern-based; a skill "
+                    "may describe waiting or timeouts using vocabulary not "
+                    "captured by the patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# FLOATING_POINT_IN_DECISION_PATH
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate floats are used for exact decisions.
+_FLOAT_DECISION_PATTERNS = [
+    re.compile(
+        r"\bfloat(?:ing|s)?\b.*\b(==|equal(?:ity)?|compare|comparison)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(==|equal(?:ity)?|compare|comparison)\b.*\bfloat(?:ing|s)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\bfloat(?:ing|s)?\b.*\b(money|financial|currency|payment|balance|"
+        r"total|sum|amount)\b",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(money|financial|currency|payment|balance|total|sum|amount)\b"
+        r".*\bfloat(?:ing|s)?\b",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bdouble\b.*\b(==|equal|compare)\b", re.IGNORECASE),
+    re.compile(r"\b(==|equal|compare)\b.*\bdouble\b", re.IGNORECASE),
+]
+
+# Patterns that indicate exact arithmetic is used instead.
+_EXACT_ARITHMETIC_PATTERNS = [
+    re.compile(r"\bFraction\b"),
+    re.compile(r"\bDecimal\b"),
+    re.compile(r"\binteger\b", re.IGNORECASE),
+    re.compile(r"\bfixed[- ]?point\b", re.IGNORECASE),
+    re.compile(r"\bscaled\s+integer\b", re.IGNORECASE),
+    re.compile(r"\bepsilon\b", re.IGNORECASE),
+    re.compile(r"\btolerance\b", re.IGNORECASE),
+    re.compile(r"\bapproximat(?:e|ely)\b", re.IGNORECASE),
+]
+
+
+def _check_floating_point_in_decision_path(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs using floating-point arithmetic for a
+    decision requiring exactness (equality, comparison, money, financial).
+
+    Floats in the decision path are a universal engineering defect: float
+    summation is ordering- and platform-dependent, so the digest cannot
+    be stable. Equality checks on floats are unreliable. Financial
+    calculations with floats lose cents. No methodology considers this
+    correct.
+
+    Limitation: pattern-based. A skill may describe float usage or exact
+    arithmetic using vocabulary not captured by the patterns. The
+    finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_float = any(p.search(text) for p in _FLOAT_DECISION_PATTERNS)
+            if not has_float:
+                continue
+            has_exact = any(
+                p.search(text) for p in _EXACT_ARITHMETIC_PATTERNS
+            )
+            if has_exact:
+                continue
+            findings.append(_finding(
+                cls="FLOATING_POINT_IN_DECISION_PATH",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs using floating-point "
+                    f"arithmetic for an exact decision (equality, "
+                    f"comparison, money, financial) without exact "
+                    f"arithmetic (Fraction, Decimal, integer, epsilon)"
+                ),
+                violated_invariant=(
+                    "a decision requiring exactness must not use floating-"
+                    "point arithmetic; float summation is ordering- and "
+                    "platform-dependent, equality checks are unreliable, "
+                    "and financial calculations lose cents"
+                ),
+                limitation=(
+                    "float-usage and exact-arithmetic detection are "
+                    "pattern-based; a skill may describe float usage or "
+                    "exact arithmetic using vocabulary not captured by "
+                    "the patterns; the finding is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_float = any(p.search(text) for p in _FLOAT_DECISION_PATTERNS)
+            if not has_float:
+                continue
+            has_exact = any(
+                p.search(text) for p in _EXACT_ARITHMETIC_PATTERNS
+            )
+            if has_exact:
+                continue
+            findings.append(_finding(
+                cls="FLOATING_POINT_IN_DECISION_PATH",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs using floating-point "
+                    f"arithmetic for an exact decision (equality, "
+                    f"comparison, money, financial) without exact "
+                    f"arithmetic (Fraction, Decimal, integer, epsilon)"
+                ),
+                violated_invariant=(
+                    "a decision requiring exactness must not use floating-"
+                    "point arithmetic; float summation is ordering- and "
+                    "platform-dependent, equality checks are unreliable, "
+                    "and financial calculations lose cents"
+                ),
+                limitation=(
+                    "float-usage and exact-arithmetic detection are "
+                    "pattern-based; a skill may describe float usage or "
+                    "exact arithmetic using vocabulary not captured by "
+                    "the patterns; the finding is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# UNPINNED_DEPENDENCY
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate a dependency is installed without version pinning.
+_UNPINNED_DEPENDENCY_PATTERNS = [
+    re.compile(r"\bpip\s+install\s+(\S+)(?!\s*[=<>!~])", re.IGNORECASE),
+    re.compile(r"\bnpm\s+install\s+(\S+)(?!\s*@)", re.IGNORECASE),
+    re.compile(r"\byarn\s+add\s+(\S+)(?!\s*@)", re.IGNORECASE),
+    re.compile(r"\bcargo\s+add\s+(\S+)(?!\s*@|=)", re.IGNORECASE),
+    re.compile(r"\bgo\s+get\s+(\S+)(?!\s*@)", re.IGNORECASE),
+    re.compile(r"\bapt(?:-get)?\s+install\s+(\S+)(?!\s*=)", re.IGNORECASE),
+    re.compile(r"\binstall\s+the\s+latest\b", re.IGNORECASE),
+    re.compile(r"\binstall\s+latest\b", re.IGNORECASE),
+    re.compile(r"\buse\s+the\s+latest\s+version\b", re.IGNORECASE),
+]
+
+# Patterns that indicate version pinning is present.
+_PINNED_DEPENDENCY_PATTERNS = [
+    re.compile(r"==\s*[\d.]"),
+    re.compile(r"@\s*[\d.]"),
+    re.compile(r"=\s*[\d.]"),
+    re.compile(r"\bpin(?:ned|ning)?\b", re.IGNORECASE),
+    re.compile(r"\block\s+file\b", re.IGNORECASE),
+    re.compile(r"\brequirements\.txt\b"),
+    re.compile(r"\bpackage-lock\.json\b"),
+    re.compile(r"\bCargo\.lock\b"),
+    re.compile(r"\bgo\.sum\b"),
+    re.compile(r"\bpoetry\.lock\b"),
+    re.compile(r"\bpdm\.lock\b"),
+    re.compile(r"\buv\.lock\b"),
+    re.compile(r"\bversion\s+pin(?:ned|ning)?\b", re.IGNORECASE),
+    re.compile(r"\bspecific\s+version\b", re.IGNORECASE),
+]
+
+
+def _check_unpinned_dependency(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A rule or step that instructs installing a dependency without
+    version pinning (pip install X without ==version, npm install X
+    without @version, install latest).
+
+    Unpinned dependencies are a universal engineering defect: the build
+    breaks when a new version is released, and supply-chain attacks
+    often arrive in newly published versions. No methodology considers
+    floating versions correct for production.
+
+    Limitation: pattern-based. A skill may describe installation or
+    pinning using vocabulary not captured by the patterns. The finding
+    is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            text = rule.get("text", "")
+            has_unpinned = any(
+                p.search(text) for p in _UNPINNED_DEPENDENCY_PATTERNS
+            )
+            if not has_unpinned:
+                continue
+            has_pinned = any(
+                p.search(text) for p in _PINNED_DEPENDENCY_PATTERNS
+            )
+            if has_pinned:
+                continue
+            findings.append(_finding(
+                cls="UNPINNED_DEPENDENCY",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} instructs installing a dependency "
+                    f"without version pinning (pip install, npm install, "
+                    f"install latest) without a pin (==version, @version, "
+                    f"lock file)"
+                ),
+                violated_invariant=(
+                    "a dependency must be version-pinned; unpinned "
+                    "dependencies break the build when a new version is "
+                    "released and expose the system to supply-chain attacks "
+                    "that arrive in newly published versions"
+                ),
+                limitation=(
+                    "installation and pinning detection are pattern-based; "
+                    "a skill may describe installation or pinning using "
+                    "vocabulary not captured by the patterns; the finding "
+                    "is CANDIDATE"
+                ),
+            ))
+        for step in skill.get("procedural_steps", []):
+            text = step.get("text", "")
+            has_unpinned = any(
+                p.search(text) for p in _UNPINNED_DEPENDENCY_PATTERNS
+            )
+            if not has_unpinned:
+                continue
+            has_pinned = any(
+                p.search(text) for p in _PINNED_DEPENDENCY_PATTERNS
+            )
+            if has_pinned:
+                continue
+            findings.append(_finding(
+                cls="UNPINNED_DEPENDENCY",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=step["source_span"],
+                rule_id=step["id"],
+                evidence=(
+                    f"step {step['id']} instructs installing a dependency "
+                    f"without version pinning (pip install, npm install, "
+                    f"install latest) without a pin (==version, @version, "
+                    f"lock file)"
+                ),
+                violated_invariant=(
+                    "a dependency must be version-pinned; unpinned "
+                    "dependencies break the build when a new version is "
+                    "released and expose the system to supply-chain attacks "
+                    "that arrive in newly published versions"
+                ),
+                limitation=(
+                    "installation and pinning detection are pattern-based; "
+                    "a skill may describe installation or pinning using "
+                    "vocabulary not captured by the patterns; the finding "
+                    "is CANDIDATE"
                 ),
             ))
     return findings

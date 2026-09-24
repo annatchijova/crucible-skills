@@ -101,6 +101,23 @@ corpus (88 skills), they produce 27 CANDIDATE findings: 4 UNBOUNDED_RETRY,
 2 OVERCLAIM, 3 NON_DETERMINISTIC_INSTRUCTION, 18
 IRREVERSIBLE_WITHOUT_REVIEW, 0 LLM_IN_DECISION_PATH, 0 MISSING_FAILURE_MODE.
 
+L10 (engineering defect taxonomy) adds eight more style-agnostic
+engineering checks: SECRET_IN_OUTPUT (secret sent to log/print/echo
+without redaction/mask/hash/encrypt), SILENT_FAILURE (error
+ignored/swallowed/suppressed without log/report/raise/retry),
+HARDCODED_CREDENTIAL (secret/password/token hardcoded in code without
+env var/vault/KMS), UNBOUNDED_RESOURCE (load all/read all/load into
+memory without limit/max/batch/stream/paginate),
+UNVALIDATED_EXTERNAL_INPUT (user input/request/stdin/argv accepted
+without validate/sanitize/schema/type check),
+MISSING_TIMEOUT (wait indefinitely/block forever/wait until success
+without timeout/deadline/TTL), FLOATING_POINT_IN_DECISION_PATH (float
+compared for equality or used for money without Fraction/Decimal/
+integer/epsilon), and UNPINNED_DEPENDENCY (pip/npm/cargo install
+without version pin or lock file). On the real corpus, they produce 1
+CANDIDATE finding: 1 SECRET_IN_OUTPUT, 0 for the other seven (the
+corpus is well-written for these defect classes).
+
 L9 (style-agnostic extraction) extends the L1 compiler to recognize
 normative language beyond RFC-2119 modals: absoluteness starters (Never,
 Always, Do not, Don't), imperative constraint verbs (Ensure, Require,
