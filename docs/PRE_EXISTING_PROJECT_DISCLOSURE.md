@@ -1,12 +1,12 @@
 # Pre-existing Project Disclosure
 
-**Project:** Crucible Skills
-**Repository:** https://github.com/annatchijova/crucible-skills
+**Project:** Crucible
+**Repository:** https://github.com/annatchijova/crucible
 **License:** Apache-2.0
 
 ## Project origin
 
-Crucible Skills was built from scratch during the hackathon period. The
+Crucible was built from scratch during the hackathon period. The
 first commit (`7319b81 chore: establish repository baseline`) was made on
 2026-09-23. All 38 commits in the repository were made on 2026-09-23 and
 2026-09-24. No code, tests, or documentation existed before the hackathon.
