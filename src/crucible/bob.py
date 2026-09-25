@@ -646,7 +646,7 @@ BOB_FIXTURE: dict[str, str] = {
         "license: Apache-2.0\n"
         "---\n\n"
         "# Bounded retries\n\n"
-        "Retries MUST have a finite budget.\n\n"
+        "Retries MUST have a finite budget, except for read-only operations.\n\n"
         "The operation SHOULD be idempotent before retrying.\n"
     ),
     "gate": (

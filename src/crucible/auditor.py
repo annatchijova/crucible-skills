@@ -79,6 +79,7 @@ def audit_corpus(artifact: dict[str, Any]) -> dict[str, Any]:
     findings.extend(_check_missing_timeout(skills))
     findings.extend(_check_floating_point_in_decision_path(skills))
     findings.extend(_check_unpinned_dependency(skills))
+    findings.extend(_check_overgeneralization(skills))
 
     findings.sort(key=_finding_sort_key)
     for index, finding in enumerate(findings):
@@ -2752,6 +2753,131 @@ def _check_unpinned_dependency(
                     "a skill may describe installation or pinning using "
                     "vocabulary not captured by the patterns; the finding "
                     "is CANDIDATE"
+                ),
+            ))
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# Overgeneralization check (M002 survivor kill)
+# ---------------------------------------------------------------------------
+
+# Subjects that typically require exception clauses when governed by
+# absolute modality (MUST, MUST_NOT, NEVER, ALWAYS) AND the rule text
+# contains a bound indicator (budget, finite, limit, max). A rule about
+# retries with a finite budget needs an exception for read-only operations;
+# a rule about irreversible operations needing bounded effects does not
+# need an exception because ALL irreversible operations should be bounded.
+_OVERGENERALIZATION_SUBJECTS = [
+    re.compile(r"\bretr(?:y|ies|ying)\b", re.IGNORECASE),
+    re.compile(r"\bdelete\b", re.IGNORECASE),
+    re.compile(r"\bdrop\b", re.IGNORECASE),
+    re.compile(r"\bdestroy\b", re.IGNORECASE),
+    re.compile(r"\bforce(?:[- ])?push\b", re.IGNORECASE),
+    re.compile(r"\bforce[- ]?reset\b", re.IGNORECASE),
+    re.compile(r"\btruncate\b", re.IGNORECASE),
+    re.compile(r"\bpurge\b", re.IGNORECASE),
+    re.compile(r"\bwipe\b", re.IGNORECASE),
+    re.compile(r"\boverwrite\b", re.IGNORECASE),
+]
+
+# Bound indicators that suggest the rule is about a limit that could
+# have exceptions. Without one of these, the rule is likely a general
+# constraint that doesn't need a carve-out.
+_OVERGENERALIZATION_BOUND_INDICATORS = [
+    re.compile(r"\bbudget\b", re.IGNORECASE),
+    re.compile(r"\bfinite\b", re.IGNORECASE),
+    re.compile(r"\blimit\b", re.IGNORECASE),
+    re.compile(r"\bmax(?:imum)?\b", re.IGNORECASE),
+    re.compile(r"\bcap\b", re.IGNORECASE),
+    re.compile(r"\bthreshold\b", re.IGNORECASE),
+]
+
+# Modalities that make an absolute claim requiring exceptions.
+_ABSOLUTE_MODALITIES = frozenset({"MUST", "MUST_NOT", "NEVER", "ALWAYS"})
+
+
+def _check_overgeneralization(
+    skills: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """A normative rule with absolute modality about a subject that
+    typically requires exceptions, but the rule has zero exception
+    conditions.
+
+    This detects overgeneralization: a rule that says "Retries MUST have
+    a finite budget" without "except for read-only operations" is
+    overgeneralized because it applies unconditionally to all operations
+    including ones that should be exempt.
+
+    The check uses the IR's existing condition extraction: rules with
+    conditions of type "exception" have carve-outs; rules without any
+    exception conditions about subjects in the overgeneralization set
+    are flagged.
+
+    Limitation: the subject keyword set is deterministic but coarse.
+    A rule about "retries" that genuinely needs no exception will be a
+    false positive. The finding is CANDIDATE.
+    """
+    findings: list[dict[str, Any]] = []
+    for skill in skills:
+        name = skill["identity"]["name"]
+        source_path = skill["identity"]["source_path"]
+        for rule in skill.get("rules", []):
+            modality = rule.get("modality", "")
+            if modality not in _ABSOLUTE_MODALITIES:
+                continue
+            subject = rule.get("subject", "")
+            # Check both the subject and the full rule text for keywords,
+            # since non-RFC-2119 rules have subject="" and the keyword
+            # appears in the text.
+            search_text = f"{subject} {rule.get('text', '')}".lower()
+            has_overgeneralization_subject = any(
+                p.search(search_text) for p in _OVERGENERALIZATION_SUBJECTS
+            )
+            if not has_overgeneralization_subject:
+                continue
+            # Check if the rule text contains a bound indicator (budget,
+            # finite, limit, max, etc.) that suggests the rule is about a
+            # limit that could have exceptions. Without a bound indicator,
+            # the rule is likely a general constraint that doesn't need
+            # a carve-out.
+            rule_text = rule.get("text", "")
+            has_bound = any(
+                p.search(rule_text) for p in _OVERGENERALIZATION_BOUND_INDICATORS
+            )
+            if not has_bound:
+                continue
+            # Check if the rule has any exception-type conditions.
+            conditions = rule.get("conditions", [])
+            has_exception = any(
+                c.get("type") == "exception" for c in conditions
+            )
+            if has_exception:
+                continue
+            findings.append(_finding(
+                cls="OVERGENERALIZATION",
+                epistemic_status="CANDIDATE",
+                skill=name,
+                source_path=source_path,
+                source_span=rule["source_span"],
+                rule_id=rule["id"],
+                evidence=(
+                    f"rule {rule['id']} uses absolute modality {modality} "
+                    f"about a subject that typically requires exceptions "
+                    f"(retry/irreversible/delete/etc.) but has zero "
+                    f"exception conditions"
+                ),
+                violated_invariant=(
+                    "a normative rule with absolute modality about a "
+                    "subject that typically requires exceptions should "
+                    "declare an exception clause for cases that warrant "
+                    "a carve-out"
+                ),
+                limitation=(
+                    "the subject keyword set is deterministic but coarse; "
+                    "a rule about retries or irreversible actions that "
+                    "genuinely needs no exception will be a false positive; "
+                    "the finding is CANDIDATE"
                 ),
             ))
     return findings

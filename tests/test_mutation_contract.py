@@ -138,28 +138,29 @@ def test_trigger_widening_is_abstained() -> None:
     assert result["survivor_classification"] == SC_OUT_OF_SCOPE
 
 
-def test_exception_removal_survives_with_classification() -> None:
-    """Invariant: exception removal survives because the IR does not extract
-    exceptions. The survivor is classified as INSUFFICIENT_REPRESENTATION,
-    not a generic failure. Mutation: classify all survivors as
-    INSUFFICIENT_DETECTOR -> red."""
+def test_exception_removal_killed_by_overgeneralization() -> None:
+    """Invariant: exception removal is killed by the OVERGENERALIZATION
+    check, which flags absolute-modality rules about retry/irreversible
+    subjects with bound indicators (budget, finite, limit) that have
+    zero exception conditions.
+    Mutation: remove the OVERGENERALIZATION check -> red."""
     report = run_mutation_lab()
     result = next(r for r in report["results"]
                   if r["mutation_class"] == "EXCEPTION_REMOVAL")
-    assert result["status"] == ST_SURVIVED
-    assert result["survivor_classification"] == SC_INSUFFICIENT_REPRESENTATION
+    assert result["status"] == ST_KILLED
+    assert "OVERGENERALIZATION" in result["observed_finding_classes"]
 
 
-def test_edge_removal_survives_with_classification() -> None:
-    """Invariant: edge removal survives because the auditor does not detect
-    the disappearance of a composition edge (only broken edges, not missing
-    ones). The survivor is classified as INSUFFICIENT_DETECTOR.
-    Mutation: classify as EQUIVALENT_MUTANT -> red."""
+def test_edge_removal_killed_by_isolated_skill() -> None:
+    """Invariant: edge removal is killed by the ISOLATED_SKILL graph
+    property, which fires when a skill has no resolved edges to any
+    other skill in a corpus that previously had edges.
+    Mutation: remove the ISOLATED_SKILL graph property -> red."""
     report = run_mutation_lab()
     result = next(r for r in report["results"]
                   if r["mutation_class"] == "EDGE_REMOVAL")
-    assert result["status"] == ST_SURVIVED
-    assert result["survivor_classification"] == SC_INSUFFICIENT_DETECTOR
+    assert result["status"] == ST_KILLED
+    assert "ISOLATED_SKILL" in result["observed_finding_classes"]
 
 
 # ---------------------------------------------------------------------------

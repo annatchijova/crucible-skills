@@ -20,9 +20,72 @@ jobs:
       - name: Run tests
         run: PYTHONPATH=src python3 -m pytest -q
 
+  security-regression:
+    name: Security regression (red-team contract)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e ".[test]"
+      - name: Run red-team contract tests
+        run: PYTHONPATH=src python3 -m pytest tests/test_red_team_fixes_contract.py -v
+
+  mutation-gate:
+    name: Mutation lab kill rate gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run mutation lab and verify 100% kill rate
+        run: |
+          PYTHONPATH=src python3 -m crucible.cli --mutate > mutation-report.json
+          python3 -c "
+          import json, sys
+          r = json.load(open('mutation-report.json'))
+          kill_rate = r['summary']['kill_rate']
+          survived = r['summary']['by_status'].get('SURVIVED', 0)
+          print(f'kill_rate: {kill_rate}')
+          print(f'survived: {survived}')
+          assert kill_rate == '6/6', f'kill rate is {kill_rate}, expected 6/6'
+          assert survived == 0, f'{survived} mutations survived'
+          print('mutation gate: PASS')
+          "
+
+  determinism:
+    name: Determinism verification
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: pip install -e .
+      - name: Run report twice and compare digests
+        run: |
+          PYTHONPATH=src python3 -m crucible.cli --report --local-executor > report-1.json
+          PYTHONPATH=src python3 -m crucible.cli --report --local-executor > report-2.json
+          python3 -c "
+          import json
+          r1 = json.load(open('report-1.json'))
+          r2 = json.load(open('report-2.json'))
+          assert r1['report_digest'] == r2['report_digest'], \
+              f'digest mismatch: {r1[\"report_digest\"]} != {r2[\"report_digest\"]}'
+          print(f'digest: {r1[\"report_digest\"][:40]}...')
+          print('determinism: PASS')
+          "
+
   report:
     name: Full pipeline report
     runs-on: ubuntu-latest
+    needs: [test, mutation-gate, determinism]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -44,6 +107,18 @@ jobs:
           print('report_digest:', r['report_digest'][:40] + '...')
           print('nebius_blocked:', r['nebius_blocked'])
           print('levels:', sorted(r['levels'].keys()))
+          "
+      - name: Verify mutation lab in report has 100% kill rate
+        run: |
+          python3 -c "
+          import json
+          r = json.load(open('crucible-report.json'))
+          mutation = r['levels'].get('L4', {})
+          kill_rate = mutation.get('kill_rate', '')
+          survived = mutation.get('by_status', {}).get('SURVIVED', 0)
+          assert kill_rate == '6/6', f'kill rate is {kill_rate}, expected 6/6'
+          assert survived == 0, f'{survived} mutations survived'
+          print(f'mutation kill_rate in report: {kill_rate}')
           "
       - name: Render HTML viewer
         run: |
